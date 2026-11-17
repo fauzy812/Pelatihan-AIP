@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeftRight, Eye, FileText, Plus, Printer } from 'lucide-react';
+import { ArrowLeftRight, Eye, FileText, Plus, Printer, ShieldCheck } from 'lucide-react';
 import type { AppStateData, PicHistoryEntry, UserRole } from '../types/asset';
 import { formatDateId, getRolePermissions } from '../utils/assetLogic';
 import { BastPrintModal } from './BastPrintModal';
@@ -132,14 +132,25 @@ export function HandoverView({
                     <td className="px-4 py-3.5 align-top">
                       <ConditionBadge condition={entry.kondisiSerahTerima} />
                     </td>
-                    <td className="px-4 py-3.5 align-top text-xs">
-                      {isActive ? (
-                        <span className="inline-flex rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-[#1E3A8A]">
-                          Aktif Dipegang
-                        </span>
-                      ) : (
-                        <span className="text-xs text-slate-500">
-                          Selesai / Dimutasi
+                    <td className="px-4 py-3.5 align-top text-xs space-y-1.5 whitespace-nowrap">
+                      <div>
+                        {isActive ? (
+                          <span className="inline-flex whitespace-nowrap rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-[#1E3A8A]">
+                            Aktif Dipegang
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-500 whitespace-nowrap">
+                            Selesai / Dimutasi
+                          </span>
+                        )}
+                      </div>
+                      {entry.tteValidated && (
+                        <span
+                          title={`Tervalidasi QR TTE: ${entry.tteVerificationCode ?? ''}`}
+                          className="inline-flex whitespace-nowrap items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-800"
+                        >
+                          <ShieldCheck className="h-3 w-3 shrink-0" />
+                          {entry.tteVerificationCode ?? 'TTE QR Sah'}
                         </span>
                       )}
                     </td>

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Edit2, Eye, Plus, Search, Users, X } from 'lucide-react';
+import { Check, Copy, Edit2, Eye, Plus, Printer, QrCode, Search, ShieldCheck, Users, X } from 'lucide-react';
 import type { AppStateData, Employee, EmploymentStatus, UserRole } from '../types/asset';
+import { buildEmployeeQrPayload } from '../utils/assetLogic';
+import { AssetQrSvg, EmployeeQrCardModal } from './QrCodeDisplay';
 import { ConditionBadge } from './StatusBadge';
 
 const EMPLOYMENT_STATUSES: EmploymentStatus[] = [
@@ -47,6 +49,21 @@ export function EmployeesView({
     useState<EmploymentStatus>('PNS');
   const [kontak, setKontak] = useState('');
   const [formError, setFormError] = useState('');
+  const [qrModalEmployee, setQrModalEmployee] = useState<Employee | null>(null);
+  const [copiedQrId, setCopiedQrId] = useState<string | null>(null);
+
+  const handleCopyQrPayload = async (emp: Employee) => {
+    const payload = buildEmployeeQrPayload(emp);
+    try {
+      await navigator.clipboard.writeText(payload);
+      setCopiedQrId(emp.id);
+      window.setTimeout(() => {
+        setCopiedQrId((curr) => (curr === emp.id ? null : curr));
+      }, 2000);
+    } catch {
+      // Clipboard fallback ignored
+    }
+  };
 
   useEffect(() => {
     if (pendingFocusNip) {
@@ -212,11 +229,11 @@ export function EmployeesView({
             <table className="w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-600">
-                  <th className="px-5 py-3">Pegawai & NIP/ID</th>
-                  <th className="px-4 py-3">Jabatan & Bidang</th>
+                  <th className="px-5 py-3">Pegawai &amp; NIP/ID</th>
+                  <th className="px-4 py-3">Jabatan &amp; Bidang</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 text-right">Aset</th>
-                  {canManage && <th className="px-5 py-3 text-right">Aksi</th>}
+                  <th className="px-5 py-3 text-right">QR &amp; Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
@@ -264,19 +281,34 @@ export function EmployeesView({
                           {assetCount} unit
                         </button>
                       </td>
-                      {canManage && (
-                        <td className="px-5 py-3.5 align-top text-right">
+                      <td className="px-5 py-3.5 align-top text-right">
+                        <div className="flex items-center justify-end gap-1.5">
                           <button
                             type="button"
-                            onClick={() => openEditModal(emp)}
-                            aria-label={`Edit pegawai ${emp.nama}`}
-                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
+                            onClick={() => {
+                              setSelectedEmployeeId(emp.id);
+                              setQrModalEmployee(emp);
+                            }}
+                            aria-label={`Lihat QR TTE ${emp.nama}`}
+                            title="Lihat & cetak QR TTE Pegawai"
+                            className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-[#1E3A8A] hover:bg-blue-100 whitespace-nowrap"
                           >
-                            <Edit2 className="h-3 w-3" />
-                            <span>Edit</span>
+                            <QrCode className="h-3 w-3" />
+                            <span>QR TTE</span>
                           </button>
-                        </td>
-                      )}
+                          {canManage && (
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(emp)}
+                              aria-label={`Edit pegawai ${emp.nama}`}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
+                            >
+                              <Edit2 className="h-3 w-3" />
+                              <span>Edit</span>
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -301,6 +333,57 @@ export function EmployeesView({
                   <span className="font-mono">{activeEmployee.nip}</span> · Kontak:{' '}
                   <span className="font-mono">{activeEmployee.kontak}</span>
                 </p>
+              </div>
+
+              {/* Employee QR Code for Handover Validation & TTE */}
+              <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-3.5">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-[#1E3A8A]">
+                    <ShieldCheck className="h-4 w-4" />
+                    <span>QR Validasi / TTE Serah Terima Aset</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setQrModalEmployee(activeEmployee)}
+                    className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-[#1E3A8A] hover:bg-blue-50"
+                  >
+                    <Printer className="h-3 w-3" />
+                    <span>Cetak Kartu QR</span>
+                  </button>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <div className="shrink-0">
+                    <AssetQrSvg
+                      value={buildEmployeeQrPayload(activeEmployee)}
+                      size={88}
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-2 text-xs">
+                    <p className="text-slate-600 leading-relaxed">
+                      Pindai QR ini saat proses Serah Terima PIC / BAST sebagai validasi Tanda Tangan Elektronik (TTE) penerima aset.
+                    </p>
+                    <p className="break-all rounded border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-[10px] text-slate-600">
+                      {buildEmployeeQrPayload(activeEmployee)}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyQrPayload(activeEmployee)}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
+                    >
+                      {copiedQrId === activeEmployee.id ? (
+                        <>
+                          <Check className="h-3 w-3 text-emerald-600" />
+                          <span className="text-emerald-700">Kode QR Disalin</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-3 w-3" />
+                          <span>Salin Kode QR TTE</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -522,6 +605,13 @@ export function EmployeesView({
             </form>
           </div>
         </div>
+      )}
+
+      {qrModalEmployee && (
+        <EmployeeQrCardModal
+          employee={qrModalEmployee}
+          onClose={() => setQrModalEmployee(null)}
+        />
       )}
     </div>
   );

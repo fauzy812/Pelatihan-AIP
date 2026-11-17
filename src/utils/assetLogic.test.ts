@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { INITIAL_SEED_DATA } from '../data/seedData';
 import {
+  buildEmployeeQrPayload,
+  buildTteVerificationCode,
   computeDashboardMetrics,
   createNewAsset,
   filterAssets,
@@ -9,6 +11,7 @@ import {
   getRolePermissions,
   handoverAssetToPic,
   reportAssetDamage,
+  resolveEmployeeFromQrInput,
   resolveMaintenanceTicket,
   returnAssetToPool,
   updateAssetDetails,
@@ -349,6 +352,53 @@ test('validateBackupPayload restores valid backup JSON and rejects invalid paylo
   assert.equal(restored.assets.length, INITIAL_SEED_DATA.assets.length);
   assert.equal(restored.auditLogs[0].aksi, 'Pemulihan Backup JSON');
 });
+
+test('buildEmployeeQrPayload, resolveEmployeeFromQrInput, and TTE QR handover work end-to-end', () => {
+  const emp = INITIAL_SEED_DATA.employees[2];
+  const qrPayload = buildEmployeeQrPayload(emp);
+  assert.ok(qrPayload.startsWith(`TTE-PIC|DPUBMSDA-SDA|${emp.id}|${emp.nip}|`));
+
+  const resolvedFromQr = resolveEmployeeFromQrInput(
+    INITIAL_SEED_DATA.employees,
+    qrPayload,
+  );
+  assert.equal(resolvedFromQr?.id, emp.id);
+
+  const resolvedFromNip = resolveEmployeeFromQrInput(
+    INITIAL_SEED_DATA.employees,
+    emp.nip.replace(/\s+/g, ''),
+  );
+  assert.equal(resolvedFromNip?.id, emp.id);
+
+  const tteCode = buildTteVerificationCode({
+    assetId: 'ast-1',
+    employeeId: emp.id,
+    nip: emp.nip,
+    nomorBast: '027/888/438.5.4/2026',
+    tanggal: '2026-11-17',
+  });
+  assert.ok(tteCode.startsWith('TTE-SDA-'));
+
+  const next = handoverAssetToPic(INITIAL_SEED_DATA, {
+    assetId: 'ast-1',
+    newEmployeeId: emp.id,
+    tanggalSerahTerima: '2026-11-17',
+    nomorBast: '027/888/438.5.4/2026',
+    kondisiSerahTerima: 'Baik',
+    catatan: 'Validasi serah terima TTE QR.',
+    tteValidated: true,
+    tteVerificationCode: tteCode,
+    tteEmployeeQrPayload: qrPayload,
+  });
+
+  const latestPic = next.picHistory[next.picHistory.length - 1];
+  assert.equal(latestPic.tteValidated, true);
+  assert.equal(latestPic.tteVerificationCode, tteCode);
+  assert.equal(latestPic.tteEmployeeQrPayload, qrPayload);
+  assert.equal(next.auditLogs[0].aksi, 'Serah Terima PIC (TTE QR)');
+  assert.ok(next.auditLogs[0].detailPerubahan.includes(tteCode));
+});
+
 
 
 

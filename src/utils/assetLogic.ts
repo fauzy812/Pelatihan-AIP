@@ -458,6 +458,61 @@ export function filterAssets(
   });
 }
 
+export function buildEmployeeQrPayload(
+  employee: Pick<Employee, 'id' | 'nip' | 'nama'>,
+): string {
+  return `TTE-PIC|DPUBMSDA-SDA|${employee.id}|${employee.nip}|${employee.nama}`;
+}
+
+export function resolveEmployeeFromQrInput(
+  employees: Employee[],
+  rawInput: string,
+): Employee | null {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith('TTE-PIC|DPUBMSDA-SDA|')) {
+    const parts = trimmed.split('|');
+    const qrId = parts[2]?.trim();
+    const qrNip = parts[3]?.trim();
+    const byId = employees.find((e) => e.id === qrId);
+    if (byId) return byId;
+    if (qrNip) {
+      const byNip = employees.find((e) => e.nip === qrNip);
+      if (byNip) return byNip;
+    }
+  }
+
+  const normalized = trimmed.replace(/\s+/g, '').toLowerCase();
+  return (
+    employees.find(
+      (e) =>
+        e.id.toLowerCase() === trimmed.toLowerCase() ||
+        e.nip.replace(/\s+/g, '').toLowerCase() === normalized,
+    ) ?? null
+  );
+}
+
+export function buildTteVerificationCode(params: {
+  assetId: string;
+  employeeId: string;
+  nip: string;
+  nomorBast: string;
+  tanggal: string;
+}): string {
+  const seed = `${params.assetId}|${params.employeeId}|${params.nip}|${params.nomorBast}|${params.tanggal}`;
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  for (let i = 0; i < seed.length; i++) {
+    const c = seed.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193);
+    h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b);
+  }
+  const part1 = (h1 >>> 0).toString(36).toUpperCase().padStart(6, '0').slice(0, 6);
+  const part2 = (h2 >>> 0).toString(36).toUpperCase().padStart(6, '0').slice(0, 6);
+  return `TTE-SDA-${part1}-${part2}`;
+}
+
 export interface HandoverParams {
   assetId: string;
   newEmployeeId: string;
@@ -468,6 +523,10 @@ export interface HandoverParams {
   catatan: string;
   fileBastUrl?: string;
   fileBastNama?: string;
+  tteValidated?: boolean;
+  tteTimestamp?: string;
+  tteVerificationCode?: string;
+  tteEmployeeQrPayload?: string;
 }
 
 export function handoverAssetToPic(
@@ -501,6 +560,17 @@ export function handoverAssetToPic(
     return entry;
   });
 
+  const tteCode = params.tteValidated
+    ? params.tteVerificationCode ||
+      buildTteVerificationCode({
+        assetId: params.assetId,
+        employeeId: params.newEmployeeId,
+        nip: employee.nip,
+        nomorBast: params.nomorBast.trim(),
+        tanggal: params.tanggalSerahTerima,
+      })
+    : undefined;
+
   const newEntry: PicHistoryEntry = {
     id: `pic-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     assetId: params.assetId,
@@ -512,6 +582,14 @@ export function handoverAssetToPic(
     catatan: params.catatan.trim() || 'Serah terima pemakaian aset dinas.',
     fileBastUrl: params.fileBastUrl,
     fileBastNama: params.fileBastNama,
+    tteValidated: params.tteValidated,
+    tteTimestamp: params.tteValidated
+      ? params.tteTimestamp ?? new Date().toISOString()
+      : undefined,
+    tteVerificationCode: tteCode,
+    tteEmployeeQrPayload: params.tteValidated
+      ? params.tteEmployeeQrPayload ?? buildEmployeeQrPayload(employee)
+      : undefined,
   };
 
   const updatedAssets: Asset[] = data.assets.map((a) => {
@@ -534,10 +612,10 @@ export function handoverAssetToPic(
     auditLogs: appendAuditLog(
       data.auditLogs,
       actor,
-      'Serah Terima PIC',
+      params.tteValidated ? 'Serah Terima PIC (TTE QR)' : 'Serah Terima PIC',
       'Serah Terima PIC',
       asset.id,
-      `Mutasi "${asset.nama}" ke ${employee.nama} (BAST ${params.nomorBast.trim()}, Kondisi: ${params.kondisiSerahTerima}).`,
+      `Mutasi "${asset.nama}" ke ${employee.nama} (BAST ${params.nomorBast.trim()}, Kondisi: ${params.kondisiSerahTerima}${tteCode ? `, Validasi TTE QR: ${tteCode}` : ''}).`,
     ),
   };
 }

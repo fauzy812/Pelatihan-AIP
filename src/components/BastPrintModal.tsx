@@ -1,6 +1,11 @@
-import { Printer, X } from 'lucide-react';
+import { Printer, ShieldCheck, X } from 'lucide-react';
 import type { Asset, Employee, PicHistoryEntry } from '../types/asset';
-import { formatDateId, formatRupiah } from '../utils/assetLogic';
+import {
+  buildEmployeeQrPayload,
+  formatDateId,
+  formatRupiah,
+} from '../utils/assetLogic';
+import { AssetQrSvg } from './QrCodeDisplay';
 import { ConditionBadge } from './StatusBadge';
 
 interface BastPrintModalProps {
@@ -165,7 +170,30 @@ export function BastPrintModal({
               <p className="font-semibold text-slate-900">
                 {recipient?.jabatan ?? 'Pemakai Barang'}
               </p>
-              <div className="h-14" />
+              {recipient ? (
+                <div className="my-2 flex flex-col items-center justify-center gap-1">
+                  <AssetQrSvg
+                    value={
+                      historyEntry.tteValidated && historyEntry.tteVerificationCode
+                        ? `${buildEmployeeQrPayload(recipient)}|BAST:${historyEntry.nomorBast}|${historyEntry.tteVerificationCode}`
+                        : buildEmployeeQrPayload(recipient)
+                    }
+                    size={72}
+                  />
+                  {historyEntry.tteValidated ? (
+                    <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-800">
+                      <ShieldCheck className="h-3 w-3" />
+                      TTE QR Sah · {historyEntry.tteVerificationCode}
+                    </span>
+                  ) : (
+                    <span className="font-mono text-[10px] text-slate-500">
+                      QR Identitas &amp; Validasi PIC
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="h-14" />
+              )}
               <p className="font-semibold underline text-slate-900">
                 {recipient?.nama ?? '-'}
               </p>
@@ -178,7 +206,15 @@ export function BastPrintModal({
               <p className="font-semibold text-slate-900">
                 Pengurus Barang Pengguna
               </p>
-              <div className="h-14" />
+              <div className="my-2 flex flex-col items-center justify-center gap-1">
+                <AssetQrSvg
+                  value={`TTE-PENGURUS|DPUBMSDA-SDA|19910822 201903 2 011|${historyEntry.nomorBast}`}
+                  size={72}
+                />
+                <span className="font-mono text-[10px] text-slate-500">
+                  Validasi Pengurus Barang BMD
+                </span>
+              </div>
               <p className="font-semibold underline text-slate-900">
                 Dina Kartikasari, S.E.
               </p>

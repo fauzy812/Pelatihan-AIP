@@ -61,6 +61,10 @@ export interface PicHistoryEntry {
   catatan: string;
   fileBastUrl?: string;
   fileBastNama?: string;
+  tteValidated?: boolean;
+  tteTimestamp?: string;
+  tteVerificationCode?: string;
+  tteEmployeeQrPayload?: string;
 }
 
 export interface MaintenanceRecord {

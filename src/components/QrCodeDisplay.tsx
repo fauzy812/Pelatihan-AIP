@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { Printer, QrCode, ScanLine, Search, X } from 'lucide-react';
-import type { Asset } from '../types/asset';
+import { Check, Copy, Printer, QrCode, ScanLine, Search, ShieldCheck, X } from 'lucide-react';
+import type { Asset, Employee } from '../types/asset';
+import { buildEmployeeQrPayload } from '../utils/assetLogic';
 
 export function AssetQrSvg({
   value,
@@ -298,3 +299,130 @@ export function QrFieldScannerModal({
     </div>
   );
 }
+
+export function EmployeeQrCardModal({
+  employee,
+  onClose,
+}: {
+  employee: Employee;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const qrPayload = buildEmployeeQrPayload(employee);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(qrPayload);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback ignored
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="emp-qr-print-title"
+    >
+      <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+        <div className="no-print mb-4 flex items-center justify-between border-b border-slate-200 pb-3">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-[#1E3A8A]" />
+            <h3 id="emp-qr-print-title" className="text-base font-semibold text-slate-900">
+              Kartu QR TTE Pegawai (PIC)
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Tutup kartu QR pegawai"
+            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="rounded-lg border-2 border-slate-900 bg-white p-4">
+          <div className="border-b border-slate-900 pb-2 text-center">
+            <p className="text-[11px] font-bold tracking-wide text-slate-900 uppercase">
+              Pemerintah Kabupaten Sidoarjo
+            </p>
+            <p className="text-xs font-semibold text-[#1E3A8A]">
+              DPUBMSDA — QR Validasi &amp; TTE Serah Terima BMD
+            </p>
+          </div>
+          <div className="mt-3 flex items-center gap-4">
+            <AssetQrSvg value={qrPayload} size={112} />
+            <div className="min-w-0 flex-1 space-y-1 text-xs">
+              <div>
+                <span className="text-[11px] text-slate-500">Nama Pegawai</span>
+                <p className="font-bold text-slate-900 leading-snug">
+                  {employee.nama}
+                </p>
+              </div>
+              <div>
+                <span className="text-[11px] text-slate-500">
+                  NIP / ID ({employee.statusKepegawaian})
+                </span>
+                <p className="font-mono font-semibold text-slate-900 tabular-nums">
+                  {employee.nip}
+                </p>
+              </div>
+              <div>
+                <span className="text-[11px] text-slate-500">Jabatan &amp; Bidang</span>
+                <p className="text-slate-700 leading-snug">
+                  {employee.jabatan} · {employee.unitKerja}
+                </p>
+              </div>
+            </div>
+          </div>
+          <p className="mt-3 break-all rounded bg-slate-50 px-2.5 py-1.5 font-mono text-[10px] text-slate-600 border border-slate-200">
+            {qrPayload}
+          </p>
+        </div>
+
+        <div className="no-print mt-5 flex flex-wrap items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
+          >
+            {copied ? (
+              <>
+                <Check className="h-3.5 w-3.5 text-emerald-600" />
+                <span className="text-emerald-700">Kode QR Disalin</span>
+              </>
+            ) : (
+              <>
+                <Copy className="h-3.5 w-3.5" />
+                <span>Salin Payload QR</span>
+              </>
+            )}
+          </button>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Tutup
+            </button>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#1E3A8A] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-900"
+            >
+              <Printer className="h-3.5 w-3.5" />
+              <span>Cetak Kartu QR TTE</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+

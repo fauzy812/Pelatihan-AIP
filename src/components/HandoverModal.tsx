@@ -1,8 +1,24 @@
 import { useState } from 'react';
-import { ArrowLeftRight, FileText, Paperclip, Trash2, X } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  CheckCircle2,
+  FileText,
+  Paperclip,
+  QrCode,
+  ScanLine,
+  ShieldCheck,
+  Trash2,
+  X,
+} from 'lucide-react';
 import type { Asset, AssetCondition, Employee } from '../types/asset';
-import type { HandoverParams } from '../utils/assetLogic';
+import {
+  buildEmployeeQrPayload,
+  buildTteVerificationCode,
+  resolveEmployeeFromQrInput,
+  type HandoverParams,
+} from '../utils/assetLogic';
 import { readAttachmentFile } from '../utils/fileHelper';
+import { AssetQrSvg } from './QrCodeDisplay';
 
 interface HandoverModalProps {
   assets: Asset[];
@@ -43,12 +59,27 @@ export function HandoverModal({
   const [catatan, setCatatan] = useState('');
   const [fileBastUrl, setFileBastUrl] = useState('');
   const [fileBastNama, setFileBastNama] = useState('');
+
+  // TTE QR Validation State
+  const [qrScanInput, setQrScanInput] = useState('');
+  const [tteValidated, setTteValidated] = useState(false);
+  const [tteVerificationCode, setTteVerificationCode] = useState('');
+  const [tteTimestamp, setTteTimestamp] = useState('');
+  const [tteError, setTteError] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
   const selectedAsset = assets.find((a) => a.id === assetId);
   const currentPic = selectedAsset?.picAktifId
     ? employees.find((e) => e.id === selectedAsset.picAktifId)
     : undefined;
+  const targetEmployee = employees.find((e) => e.id === newEmployeeId);
+
+  const resetTteValidation = () => {
+    setTteValidated(false);
+    setTteVerificationCode('');
+    setTteTimestamp('');
+    setTteError('');
+  };
 
   const handleAssetChange = (id: string) => {
     setAssetId(id);
@@ -57,6 +88,50 @@ export function HandoverModal({
       setKondisiSerahTerima(nextAsset.kondisi);
       setLokasiPenempatanBaru(nextAsset.lokasiPenempatan);
     }
+    resetTteValidation();
+  };
+
+  const handleValidateQrString = (rawInput: string) => {
+    if (!targetEmployee) {
+      setTteError('Pilih pegawai penerima terlebih dahulu.');
+      return;
+    }
+    const resolved = resolveEmployeeFromQrInput(employees, rawInput);
+    if (!resolved) {
+      setTteValidated(false);
+      setTteVerificationCode('');
+      setTteError(
+        'Kode QR atau NIP pegawai tidak dikenali dalam Master Pegawai.',
+      );
+      return;
+    }
+    if (resolved.id !== targetEmployee.id) {
+      setTteValidated(false);
+      setTteVerificationCode('');
+      setTteError(
+        `QR Pegawai tidak cocok: terdeteksi milik "${resolved.nama}" (${resolved.nip}), bukan "${targetEmployee.nama}".`,
+      );
+      return;
+    }
+
+    const code = buildTteVerificationCode({
+      assetId,
+      employeeId: targetEmployee.id,
+      nip: targetEmployee.nip,
+      nomorBast: nomorBast.trim() || 'DRAFT',
+      tanggal: tanggalSerahTerima,
+    });
+    setTteValidated(true);
+    setTteVerificationCode(code);
+    setTteTimestamp(new Date().toISOString());
+    setTteError('');
+  };
+
+  const handleSimulateScanRecipientQr = () => {
+    if (!targetEmployee) return;
+    const payload = buildEmployeeQrPayload(targetEmployee);
+    setQrScanInput(payload);
+    handleValidateQrString(payload);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -86,6 +161,13 @@ export function HandoverModal({
       catatan: catatan.trim(),
       fileBastUrl: fileBastUrl || undefined,
       fileBastNama: fileBastNama || undefined,
+      tteValidated: tteValidated || undefined,
+      tteTimestamp: tteValidated ? tteTimestamp : undefined,
+      tteVerificationCode: tteValidated ? tteVerificationCode : undefined,
+      tteEmployeeQrPayload:
+        tteValidated && targetEmployee
+          ? buildEmployeeQrPayload(targetEmployee)
+          : undefined,
     });
     onClose();
   };
@@ -114,7 +196,7 @@ export function HandoverModal({
       aria-modal="true"
       aria-labelledby="handover-modal-title"
     >
-      <div className="flex max-h-[90vh] w-full max-w-xl flex-col rounded-xl border border-slate-200 bg-white shadow-xl">
+      <div className="flex max-h-[92vh] w-full max-w-2xl flex-col rounded-xl border border-slate-200 bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <div className="flex items-center gap-2.5">
             <ArrowLeftRight className="h-5 w-5 text-[#1E3A8A]" />
@@ -123,10 +205,10 @@ export function HandoverModal({
                 id="handover-modal-title"
                 className="text-base font-bold text-slate-900"
               >
-                Serah Terima & Mutasi PIC Aset
+                Serah Terima &amp; Mutasi PIC Aset
               </h2>
               <p className="text-xs text-slate-500">
-                Sistem otomatis menutup periode PIC sebelumnya tanpa menghapus histori
+                Sistem otomatis menutup periode PIC sebelumnya &amp; mendukung validasi QR TTE pegawai penerima
               </p>
             </div>
           </div>
@@ -169,7 +251,9 @@ export function HandoverModal({
             <p className="mt-1.5 text-xs text-slate-500">
               PIC Aktif Saat Ini:{' '}
               <span className="font-semibold text-slate-800">
-                {currentPic ? `${currentPic.nama} (${currentPic.jabatan})` : 'Tersedia di Gudang (Belum ada PIC)'}
+                {currentPic
+                  ? `${currentPic.nama} (${currentPic.jabatan})`
+                  : 'Tersedia di Gudang (Belum ada PIC)'}
               </span>
             </p>
           </div>
@@ -187,6 +271,8 @@ export function HandoverModal({
               onChange={(e) => {
                 setNewEmployeeId(e.target.value);
                 setErrorMsg('');
+                setQrScanInput('');
+                resetTteValidation();
               }}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-[#1E3A8A] focus:outline-none"
             >
@@ -197,6 +283,83 @@ export function HandoverModal({
               ))}
             </select>
           </div>
+
+          {/* QR Code TTE Pegawai Validation Panel */}
+          {targetEmployee && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-[#1E3A8A]">
+                  <ShieldCheck className="h-4 w-4" />
+                  <span>Validasi QR Code / TTE Pegawai Penerima</span>
+                </div>
+                {tteValidated ? (
+                  <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    TTE QR Tervalidasi
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-medium text-slate-500">
+                    Opsional · Disarankan untuk tanda tangan elektronik BAST
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="shrink-0">
+                  <AssetQrSvg
+                    value={buildEmployeeQrPayload(targetEmployee)}
+                    size={76}
+                  />
+                </div>
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative flex-1 min-w-[180px]">
+                      <QrCode className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                      <input
+                        id="handover-qr-tte-input"
+                        type="text"
+                        value={qrScanInput}
+                        onChange={(e) => {
+                          setQrScanInput(e.target.value);
+                          setTteError('');
+                        }}
+                        placeholder="Tempel payload QR TTE atau NIP penerima..."
+                        aria-label="Payload QR TTE atau NIP Pegawai Penerima"
+                        className="w-full rounded-lg border border-slate-300 bg-white py-1.5 pl-8 pr-3 font-mono text-xs text-slate-900 focus:border-[#1E3A8A] focus:outline-none"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleValidateQrString(qrScanInput)}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:border-[#1E3A8A] hover:text-[#1E3A8A] whitespace-nowrap"
+                    >
+                      Verifikasi QR
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSimulateScanRecipientQr}
+                      className="inline-flex items-center gap-1 rounded-lg bg-[#1E3A8A] px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-900 whitespace-nowrap"
+                    >
+                      <ScanLine className="h-3.5 w-3.5" />
+                      <span>Pindai QR Penerima</span>
+                    </button>
+                  </div>
+
+                  {tteError && (
+                    <p className="text-xs font-medium text-red-700">
+                      {tteError}
+                    </p>
+                  )}
+
+                  {tteValidated && (
+                    <p className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 font-mono text-[11px] font-semibold text-emerald-800">
+                      Validasi TTE QR Sah · Kode: {tteVerificationCode} ({targetEmployee.nama})
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
@@ -210,7 +373,10 @@ export function HandoverModal({
                 id="handover-date"
                 type="date"
                 value={tanggalSerahTerima}
-                onChange={(e) => setTanggalSerahTerima(e.target.value)}
+                onChange={(e) => {
+                  setTanggalSerahTerima(e.target.value);
+                  if (tteValidated) resetTteValidation();
+                }}
                 required
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm text-slate-900 focus:border-[#1E3A8A] focus:outline-none"
               />
@@ -227,7 +393,10 @@ export function HandoverModal({
                 id="handover-bast"
                 type="text"
                 value={nomorBast}
-                onChange={(e) => setNomorBast(e.target.value)}
+                onChange={(e) => {
+                  setNomorBast(e.target.value);
+                  if (tteValidated) resetTteValidation();
+                }}
                 placeholder="027/308/438.5.4/2026"
                 required
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm text-slate-900 focus:border-[#1E3A8A] focus:outline-none"
@@ -305,7 +474,9 @@ export function HandoverModal({
                 className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
               >
                 <Paperclip className="h-3.5 w-3.5" />
-                <span>{fileBastUrl ? 'Ganti Scan BAST' : 'Pilih Berkas Scan BAST'}</span>
+                <span>
+                  {fileBastUrl ? 'Ganti Scan BAST' : 'Pilih Berkas Scan BAST'}
+                </span>
               </label>
               <input
                 id="handover-bast-file"
@@ -346,7 +517,9 @@ export function HandoverModal({
               type="submit"
               className="rounded-lg bg-[#1E3A8A] px-5 py-2 text-sm font-semibold text-white hover:bg-blue-900"
             >
-              Proses Serah Terima PIC
+              {tteValidated
+                ? 'Proses Serah Terima (TTE QR Sah)'
+                : 'Proses Serah Terima PIC'}
             </button>
           </div>
         </form>

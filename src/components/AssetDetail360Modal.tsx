@@ -12,6 +12,7 @@ import {
   Printer,
   Save,
   ScanLine,
+  ShieldCheck,
   UserCheck,
   Wrench,
   X,
@@ -688,6 +689,12 @@ export function AssetDetail360Modal({
                                   <span className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-[#1E3A8A]">
                                     <UserCheck className="h-3 w-3" />
                                     PIC Aktif Saat Ini
+                                  </span>
+                                )}
+                                {entry.tteValidated && (
+                                  <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-emerald-800">
+                                    <ShieldCheck className="h-3 w-3" />
+                                    TTE QR: {entry.tteVerificationCode}
                                   </span>
                                 )}
                               </div>
