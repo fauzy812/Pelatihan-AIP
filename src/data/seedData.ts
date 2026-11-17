@@ -760,4 +760,61 @@ export const INITIAL_SEED_DATA: AppStateData = {
       kondisiAkhir: null,
     },
   ],
+  auditLogs: [
+    {
+      id: 'aud-101',
+      timestamp: '2024-09-01T09:15:00.000Z',
+      actorRole: 'Pengurus Barang',
+      actorName: 'Dina Kartikasari, S.E.',
+      aksi: 'Serah Terima PIC',
+      entitas: 'Serah Terima PIC',
+      entitasId: 'ast-1',
+      detailPerubahan:
+        'Mutasi Laptop Lenovo ThinkPad T14 Gen 4 ke Ahmad Fauzi, S.Kom. (BAST 027/308/438.5.4/2024).',
+    },
+    {
+      id: 'aud-102',
+      timestamp: '2025-10-06T14:30:00.000Z',
+      actorRole: 'Teknisi',
+      actorName: 'Bengkel Bubut & Alat Berat Waru',
+      aksi: 'Penyelesaian Perbaikan',
+      entitas: 'Pemeliharaan',
+      entitasId: 'mnt-402',
+      detailPerubahan:
+        'Excavator Mini PC75 selesai diperbaiki (Rp 4.200.000), kondisi akhir: Baik.',
+    },
+    {
+      id: 'aud-103',
+      timestamp: '2025-12-20T11:00:00.000Z',
+      actorRole: 'Pengurus Barang',
+      actorName: 'Dina Kartikasari, S.E.',
+      aksi: 'Pengembalian ke Gudang',
+      entitas: 'Serah Terima PIC',
+      entitasId: 'ast-9',
+      detailPerubahan:
+        'Theodolite Digital Sokkia DT740 dikembalikan ke Gudang Peralatan Bidang SDA Lt. 1 (Status: Tersedia).',
+    },
+    {
+      id: 'aud-104',
+      timestamp: '2026-11-04T08:45:00.000Z',
+      actorRole: 'Pemakai (PIC)',
+      actorName: 'M. Arifin',
+      aksi: 'Laporan Kerusakan',
+      entitas: 'Pemeliharaan',
+      entitasId: 'ast-6',
+      detailPerubahan:
+        'Pompa Submersible 300 L/detik dilaporkan Rusak Berat: Kumparan stator motor terbakar.',
+    },
+    {
+      id: 'aud-105',
+      timestamp: '2026-11-12T10:20:00.000Z',
+      actorRole: 'Teknisi',
+      actorName: 'Bengkel Hidrolik Sidoarjo',
+      aksi: 'Update Status Servis',
+      entitas: 'Pemeliharaan',
+      entitasId: 'mnt-801',
+      detailPerubahan:
+        'Dump Truck Mitsubishi Fuso Canter masuk status Dalam Perbaikan (silinder hidrolik bak dump).',
+    },
+  ],
 };

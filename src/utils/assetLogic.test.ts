@@ -6,13 +6,16 @@ import {
   createNewAsset,
   filterAssets,
   generateAssetsCsv,
+  getRolePermissions,
   handoverAssetToPic,
   reportAssetDamage,
   resolveMaintenanceTicket,
   returnAssetToPool,
+  updateAssetDetails,
   upsertCategory,
   upsertEmployee,
   upsertUnitKerja,
+  validateBackupPayload,
 } from './assetLogic';
 
 test('computeDashboardMetrics calculates accurate KPI counts and Smart Insight alerts', () => {
@@ -262,4 +265,90 @@ test('upsertEmployee adds new Pegawai and edits existing Pegawai cleanly', () =>
   assert.equal(updated?.nama, 'Fajar Ramadhan, S.T., M.T.');
   assert.equal(updated?.statusKepegawaian, 'PNS');
 });
+
+test('getRolePermissions enforces RBAC matrix per PRD section 2.1', () => {
+  const admin = getRolePermissions('Admin / Pranata Komputer');
+  assert.equal(admin.canManageMaster, true);
+  assert.equal(admin.canRestoreBackup, true);
+
+  const teknisi = getRolePermissions('Teknisi');
+  assert.equal(teknisi.canManageMaster, false);
+  assert.equal(teknisi.canHandover, false);
+  assert.equal(teknisi.canResolveMaintenance, true);
+
+  const pic = getRolePermissions('Pemakai (PIC)');
+  assert.equal(pic.canCrudAssets, false);
+  assert.equal(pic.canReportDamage, true);
+  assert.equal(pic.canResolveMaintenance, false);
+
+  const pimpinan = getRolePermissions('Pimpinan');
+  assert.equal(pimpinan.canCrudAssets, false);
+  assert.equal(pimpinan.canReportDamage, false);
+  assert.equal(pimpinan.canExportReports, true);
+});
+
+test('computeDashboardMetrics computes MTTR, >50% repair cost alerts, and idle asset relocation', () => {
+  const reported = reportAssetDamage(INITIAL_SEED_DATA, {
+    assetId: 'ast-1',
+    tanggalLapor: '2026-10-01',
+    pelaporId: 'emp-1',
+    tingkatKerusakan: 'Rusak Ringan',
+    deskripsiKerusakan: 'Kerusakan motherboard utama.',
+  });
+  const ticketId = reported.maintenance[0].id;
+  const resolved = resolveMaintenanceTicket(reported, {
+    ticketId,
+    tanggalPerbaikan: '2026-10-05',
+    tindakanPerbaikan: 'Penggantian motherboard',
+    teknisiVendor: 'CV Mitra Komputer',
+    biayaServis: 15000000,
+    kondisiAkhir: 'Baik',
+  });
+
+  const metrics = computeDashboardMetrics(resolved, '2026-11-16');
+  assert.ok(metrics.mttrDays > 0);
+  const ast1Insight = metrics.smartInsights.find((i) => i.asset.id === 'ast-1');
+  assert.ok(ast1Insight);
+  assert.equal(ast1Insight.priority, 'Tinggi');
+  assert.ok(ast1Insight.costRatioPercent > 50);
+  assert.ok(
+    ast1Insight.reasons.some((r) => r.includes('Biaya Servis Tinggi')),
+  );
+
+  // ast-9 has been Tersedia since 2025-12-20 -> idle >= 30 days
+  const idleIds = metrics.idleAssets.map((i) => i.asset.id);
+  assert.ok(idleIds.includes('ast-9'));
+});
+
+test('updateAssetDetails and mutations append immutable audit logs', () => {
+  const beforeCount = INITIAL_SEED_DATA.auditLogs.length;
+  const updated = updateAssetDetails(
+    INITIAL_SEED_DATA,
+    {
+      assetId: 'ast-1',
+      lokasiPenempatan: 'Ruang TI Lt. 3',
+      kondisi: 'Baik',
+      terakhirDiinspeksi: '2026-11-16',
+    },
+    { actorRole: 'Pengurus Barang', actorName: 'Dina Kartikasari, S.E.' },
+  );
+  assert.equal(updated.auditLogs.length, beforeCount + 1);
+  assert.equal(updated.auditLogs[0].entitas, 'Aset');
+  assert.equal(updated.auditLogs[0].actorRole, 'Pengurus Barang');
+  const asset = updated.assets.find((a) => a.id === 'ast-1');
+  assert.equal(asset?.lokasiPenempatan, 'Ruang TI Lt. 3');
+  assert.equal(asset?.terakhirDiinspeksi, '2026-11-16');
+});
+
+test('validateBackupPayload restores valid backup JSON and rejects invalid payloads', () => {
+  assert.throws(() => validateBackupPayload({ invalid: true }));
+  const restored = validateBackupPayload(INITIAL_SEED_DATA, {
+    actorRole: 'Admin / Pranata Komputer',
+    actorName: 'Ahmad Fauzi, S.Kom.',
+  });
+  assert.equal(restored.assets.length, INITIAL_SEED_DATA.assets.length);
+  assert.equal(restored.auditLogs[0].aksi, 'Pemulihan Backup JSON');
+});
+
+
 

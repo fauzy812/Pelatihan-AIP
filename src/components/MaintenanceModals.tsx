@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, CheckCircle2, Wrench, X } from 'lucide-react';
+import { AlertTriangle, Camera, CheckCircle2, Trash2, Wrench, X } from 'lucide-react';
 import type {
   Asset,
   AssetCondition,
@@ -10,6 +10,7 @@ import type {
   ReportDamageParams,
   ResolveMaintenanceParams,
 } from '../utils/assetLogic';
+import { readAttachmentFile } from '../utils/fileHelper';
 
 interface ReportDamageModalProps {
   assets: Asset[];
@@ -44,7 +45,24 @@ export function ReportDamageModal({
   >('Menunggu Perbaikan');
   const [teknisiVendor, setTeknisiVendor] = useState('');
   const [deskripsiKerusakan, setDeskripsiKerusakan] = useState('');
+  const [fotoKerusakanUrl, setFotoKerusakanUrl] = useState('');
+  const [fotoKerusakanNama, setFotoKerusakanNama] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  const handleDamagePhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const encoded = await readAttachmentFile(file, false);
+      setFotoKerusakanUrl(encoded.dataUrl);
+      setFotoKerusakanNama(encoded.fileName);
+      setErrorMsg('');
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? err.message : 'Gagal mengunggah foto kerusakan.',
+      );
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,6 +82,8 @@ export function ReportDamageModal({
       statusTiket,
       teknisiVendor: teknisiVendor.trim(),
       deskripsiKerusakan: deskripsiKerusakan.trim(),
+      fotoKerusakanUrl: fotoKerusakanUrl || undefined,
+      fotoKerusakanNama: fotoKerusakanNama || undefined,
     });
     onClose();
   };
@@ -254,6 +274,54 @@ export function ReportDamageModal({
             />
           </div>
 
+          <div>
+            <label
+              htmlFor="damage-photo-input"
+              className="mb-1.5 block text-xs font-semibold text-slate-700"
+            >
+              Foto Bukti Kerusakan (Opsional · JPG/PNG)
+            </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <label
+                htmlFor="damage-photo-input"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
+              >
+                <Camera className="h-3.5 w-3.5" />
+                <span>{fotoKerusakanUrl ? 'Ganti Foto Bukti' : 'Unggah Foto Kerusakan'}</span>
+              </label>
+              <input
+                id="damage-photo-input"
+                type="file"
+                accept="image/*"
+                onChange={handleDamagePhoto}
+                className="hidden"
+              />
+              {fotoKerusakanUrl && (
+                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1.5 pr-2.5">
+                  <img
+                    src={fotoKerusakanUrl}
+                    alt="Pratinjau foto kerusakan"
+                    className="h-10 w-10 rounded object-cover"
+                  />
+                  <span className="max-w-[160px] truncate text-xs text-slate-700">
+                    {fotoKerusakanNama}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFotoKerusakanUrl('');
+                      setFotoKerusakanNama('');
+                    }}
+                    aria-label="Hapus foto kerusakan"
+                    className="text-slate-400 hover:text-red-600"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4">
             <button
               type="button"
@@ -301,7 +369,26 @@ export function ResolveMaintenanceModal({
   );
   const [biayaServis, setBiayaServis] = useState(ticket.biayaServis || 0);
   const [kondisiAkhir, setKondisiAkhir] = useState<AssetCondition>('Baik');
+  const [fotoPerbaikanUrl, setFotoPerbaikanUrl] = useState('');
+  const [fotoPerbaikanNama, setFotoPerbaikanNama] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  const handleResolveAttachment = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const encoded = await readAttachmentFile(file, true);
+      setFotoPerbaikanUrl(encoded.dataUrl);
+      setFotoPerbaikanNama(encoded.fileName);
+      setErrorMsg('');
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? err.message : 'Gagal mengunggah bukti perbaikan.',
+      );
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -320,6 +407,8 @@ export function ResolveMaintenanceModal({
       teknisiVendor: teknisiVendor.trim(),
       biayaServis: Number(biayaServis) || 0,
       kondisiAkhir,
+      fotoPerbaikanUrl: fotoPerbaikanUrl || undefined,
+      fotoPerbaikanNama: fotoPerbaikanNama || undefined,
     });
     onClose();
   };
@@ -463,6 +552,47 @@ export function ResolveMaintenanceModal({
               required
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-[#1E3A8A] focus:outline-none"
             />
+          </div>
+
+          <div>
+            <label
+              htmlFor="resolve-attachment-input"
+              className="mb-1.5 block text-xs font-semibold text-slate-700"
+            >
+              Foto Sesudah Perbaikan / Nota Servis (Opsional · JPG/PNG/PDF)
+            </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <label
+                htmlFor="resolve-attachment-input"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
+              >
+                <Camera className="h-3.5 w-3.5" />
+                <span>{fotoPerbaikanUrl ? 'Ganti Lampiran Servis' : 'Unggah Nota / Foto Servis'}</span>
+              </label>
+              <input
+                id="resolve-attachment-input"
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={handleResolveAttachment}
+                className="hidden"
+              />
+              {fotoPerbaikanUrl && (
+                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700">
+                  <span className="max-w-[180px] truncate">{fotoPerbaikanNama}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFotoPerbaikanUrl('');
+                      setFotoPerbaikanNama('');
+                    }}
+                    aria-label="Hapus lampiran perbaikan"
+                    className="text-slate-400 hover:text-red-600"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4">

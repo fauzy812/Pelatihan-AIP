@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AddAssetModal } from './components/AddAssetModal';
 import { AssetDetail360Modal } from './components/AssetDetail360Modal';
 import { AssetsView } from './components/AssetsView';
+import { AuditBackupView } from './components/AuditBackupView';
 import { DashboardView } from './components/DashboardView';
 import { DynamicCategoriesView } from './components/DynamicCategoriesView';
 import { EmployeesView } from './components/EmployeesView';
@@ -28,30 +29,61 @@ import type {
   UserRole,
 } from './types/asset';
 import {
+  computeDashboardMetrics,
   createNewAsset,
   handoverAssetToPic,
   reportAssetDamage,
   resolveMaintenanceTicket,
   returnAssetToPool,
+  updateAssetDetails,
   updateTicketStatus,
   upsertCategory,
   upsertEmployee,
   upsertUnitKerja,
+  validateBackupPayload,
+  type ActorContext,
   type HandoverParams,
   type ReportDamageParams,
   type ResolveMaintenanceParams,
+  type UpdateAssetDetailsParams,
 } from './utils/assetLogic';
 import {
+  loadActivePicEmployeeId,
   loadAppData,
   loadUserRole,
   resetAppData,
+  saveActivePicEmployeeId,
   saveAppData,
   saveUserRole,
 } from './utils/storage';
 
+function resolveActorName(
+  role: UserRole,
+  activePicEmployeeId: string,
+  employees: Employee[],
+): string {
+  switch (role) {
+    case 'Admin / Pranata Komputer':
+      return 'Admin / Pranata Komputer';
+    case 'Pengurus Barang':
+      return 'Dina Kartikasari, S.E.';
+    case 'Teknisi':
+      return 'Tim Teknisi Sarpras DPUBMSDA';
+    case 'Pemakai (PIC)': {
+      const emp = employees.find((e) => e.id === activePicEmployeeId);
+      return emp?.nama ?? 'Pemakai (PIC)';
+    }
+    case 'Pimpinan':
+      return 'Kepala Dinas PUBMSDA';
+  }
+}
+
 export default function App() {
   const [data, setData] = useState<AppStateData>(() => loadAppData());
   const [userRole, setUserRole] = useState<UserRole>(() => loadUserRole());
+  const [activePicEmployeeId, setActivePicEmployeeId] = useState<string>(() =>
+    loadActivePicEmployeeId(),
+  );
   const [activeMenu, setActiveMenu] = useState<ActiveMenu>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -90,6 +122,28 @@ export default function App() {
     saveUserRole(userRole);
   }, [userRole]);
 
+  useEffect(() => {
+    saveActivePicEmployeeId(activePicEmployeeId);
+  }, [activePicEmployeeId]);
+
+  // Keep activePicEmployeeId valid if employee list changes
+  useEffect(() => {
+    if (
+      data.employees.length > 0 &&
+      !data.employees.some((e) => e.id === activePicEmployeeId)
+    ) {
+      setActivePicEmployeeId(data.employees[0].id);
+    }
+  }, [data.employees, activePicEmployeeId]);
+
+  const actorContext: ActorContext = useMemo(
+    () => ({
+      actorRole: userRole,
+      actorName: resolveActorName(userRole, activePicEmployeeId, data.employees),
+    }),
+    [userRole, activePicEmployeeId, data.employees],
+  );
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     window.setTimeout(() => {
@@ -97,41 +151,68 @@ export default function App() {
     }, 4000);
   };
 
-  const activeRepairCount = data.maintenance.filter(
+  const openTickets = data.maintenance.filter(
     (m) => m.statusTiket !== 'Selesai',
-  ).length;
+  );
+  const metrics = computeDashboardMetrics(data);
+  const assetNameById = new Map(data.assets.map((a) => [a.id, a.nama]));
 
   const handleAddAsset = (
     assetInput: Omit<Asset, 'id' | 'createdAt'>,
     initialBast?: string,
   ) => {
-    setData((prev) => createNewAsset(prev, assetInput, initialBast));
+    setData((prev) =>
+      createNewAsset(prev, assetInput, initialBast, actorContext),
+    );
     showToast(`Aset "${assetInput.nama}" berhasil didaftarkan.`);
+  };
+
+  const handleUpdateAssetDetails = (params: UpdateAssetDetailsParams) => {
+    setData((prev) => updateAssetDetails(prev, params, actorContext));
+    showToast('Data & kondisi inspeksi aset berhasil diperbarui.');
+  };
+
+  const handleConfirmConditionBaik = (assetId: string) => {
+    const target = data.assets.find((a) => a.id === assetId);
+    if (!target) return;
+    setData((prev) =>
+      updateAssetDetails(
+        prev,
+        {
+          assetId,
+          lokasiPenempatan: target.lokasiPenempatan,
+          kondisi: 'Baik',
+          terakhirDiinspeksi: new Date().toISOString().slice(0, 10),
+        },
+        actorContext,
+      ),
+    );
+    showToast(`Kondisi "${target.nama}" dikonfirmasi Baik oleh PIC.`);
   };
 
   const handleUpsertCategory = (
     category: Omit<AssetCategory, 'id'> & { id?: string },
   ) => {
-    setData((prev) => upsertCategory(prev, category));
+    setData((prev) => upsertCategory(prev, category, actorContext));
     showToast(`Master jenis aset "${category.nama}" tersimpan.`);
   };
 
   const handleUpsertUnit = (
     unit: Omit<UnitKerjaItem, 'id'> & { id?: string },
   ) => {
-    setData((prev) => upsertUnitKerja(prev, unit));
+    setData((prev) => upsertUnitKerja(prev, unit, actorContext));
     showToast(`Master bidang "${unit.nama}" tersimpan.`);
   };
 
   const handleUpsertEmployee = (
     employee: Omit<Employee, 'id'> & { id?: string },
   ) => {
-    setData((prev) => upsertEmployee(prev, employee));
+    setData((prev) => upsertEmployee(prev, employee, actorContext));
     showToast(`Data pegawai "${employee.nama}" tersimpan.`);
   };
 
   const handleHandoverSubmit = (params: HandoverParams) => {
-    setData((prev) => handoverAssetToPic(prev, params));
+    setData((prev) => handoverAssetToPic(prev, params, actorContext));
     showToast(`Serah terima BAST ${params.nomorBast} berhasil diproses.`);
   };
 
@@ -140,33 +221,45 @@ export default function App() {
     const asset = data.assets.find((a) => a.id === assetId);
     if (!asset) return;
     setData((prev) =>
-      returnAssetToPool(prev, {
-        assetId,
-        tanggalPengembalian: today,
-        kondisiPengembalian: asset.kondisi,
-        lokasiGudang: `Gudang ${asset.unitKerja}`,
-      }),
+      returnAssetToPool(
+        prev,
+        {
+          assetId,
+          tanggalPengembalian: today,
+          kondisiPengembalian: asset.kondisi,
+          lokasiGudang: `Gudang ${asset.unitKerja}`,
+        },
+        actorContext,
+      ),
     );
     showToast(`Aset "${asset.nama}" dikembalikan ke status Tersedia.`);
   };
 
   const handleReportDamageSubmit = (params: ReportDamageParams) => {
-    setData((prev) => reportAssetDamage(prev, params));
+    setData((prev) => reportAssetDamage(prev, params, actorContext));
     showToast(
       `Laporan kerusakan (${params.tingkatKerusakan}) tercatat dan status aset diperbarui.`,
     );
   };
 
   const handleResolveMaintenanceSubmit = (params: ResolveMaintenanceParams) => {
-    setData((prev) => resolveMaintenanceTicket(prev, params));
+    setData((prev) => resolveMaintenanceTicket(prev, params, actorContext));
     showToast(
       `Perbaikan selesai. Kondisi akhir aset diperbarui menjadi ${params.kondisiAkhir}.`,
     );
   };
 
   const handleStartProgress = (ticketId: string) => {
-    setData((prev) => updateTicketStatus(prev, ticketId, 'Dalam Perbaikan'));
+    setData((prev) =>
+      updateTicketStatus(prev, ticketId, 'Dalam Perbaikan', undefined, actorContext),
+    );
     showToast('Status tiket diperbarui menjadi Dalam Perbaikan.');
+  };
+
+  const handleRestoreBackup = (rawPayload: unknown) => {
+    const restored = validateBackupPayload(rawPayload, actorContext);
+    setData(restored);
+    showToast('Database SI-ASET DPUBMSDA berhasil dipulihkan dari backup JSON.');
   };
 
   const handleResetSimulation = () => {
@@ -190,7 +283,7 @@ export default function App() {
         onSelectMenu={setActiveMenu}
         mobileOpen={mobileMenuOpen}
         onCloseMobile={() => setMobileMenuOpen(false)}
-        activeRepairCount={activeRepairCount}
+        activeRepairCount={openTickets.length}
         userRole={userRole}
         onOpenQrScanner={() => {
           setQrScanInitialAssetId(undefined);
@@ -203,6 +296,14 @@ export default function App() {
           activeMenu={activeMenu}
           userRole={userRole}
           onChangeRole={setUserRole}
+          employees={data.employees}
+          activePicEmployeeId={activePicEmployeeId}
+          onChangeActivePicEmployeeId={setActivePicEmployeeId}
+          openTickets={openTickets}
+          smartInsights={metrics.smartInsights}
+          assetNameById={assetNameById}
+          onOpenAssetDetail={(id) => setDetailAssetId(id)}
+          onNavigateToMaintenance={() => setActiveMenu('maintenance')}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
           onOpenAddAsset={() => setShowAddAssetModal(true)}
           onOpenHandover={() => {
@@ -248,6 +349,8 @@ export default function App() {
           {activeMenu === 'assets' && (
             <AssetsView
               data={data}
+              userRole={userRole}
+              activePicEmployeeId={activePicEmployeeId}
               selectedCategoryId={selectedCategoryId}
               onSelectCategoryId={setSelectedCategoryId}
               selectedCondition={selectedCondition}
@@ -256,6 +359,7 @@ export default function App() {
               onChangeSearchQuery={setSearchQuery}
               onOpenAssetDetail={(id) => setDetailAssetId(id)}
               onOpenAddAsset={() => setShowAddAssetModal(true)}
+              onConfirmConditionBaik={handleConfirmConditionBaik}
             />
           )}
 
@@ -290,6 +394,7 @@ export default function App() {
           {activeMenu === 'handover' && (
             <HandoverView
               data={data}
+              userRole={userRole}
               onOpenHandoverModal={(assetId) => {
                 setHandoverModalAssetId(assetId);
                 setShowHandoverModal(true);
@@ -301,6 +406,7 @@ export default function App() {
           {activeMenu === 'maintenance' && (
             <MaintenanceView
               data={data}
+              userRole={userRole}
               onOpenReportDamage={() => {
                 setDamageModalAssetId(undefined);
                 setShowReportDamageModal(true);
@@ -312,6 +418,15 @@ export default function App() {
           )}
 
           {activeMenu === 'reports' && <ReportsView data={data} />}
+
+          {activeMenu === 'audit-backup' && (
+            <AuditBackupView
+              data={data}
+              userRole={userRole}
+              onChangeRole={setUserRole}
+              onRestoreBackup={handleRestoreBackup}
+            />
+          )}
         </main>
       </div>
 
@@ -320,7 +435,9 @@ export default function App() {
         <AssetDetail360Modal
           assetId={detailAssetId}
           data={data}
+          userRole={userRole}
           onClose={() => setDetailAssetId(null)}
+          onUpdateAssetDetails={handleUpdateAssetDetails}
           onOpenHandoverForAsset={(id) => {
             setHandoverModalAssetId(id);
             setShowHandoverModal(true);

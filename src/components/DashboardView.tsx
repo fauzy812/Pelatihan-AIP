@@ -2,15 +2,19 @@ import { useState } from 'react';
 import {
   AlertOctagon,
   AlertTriangle,
+  ArrowRightLeft,
   ArrowUpRight,
   Boxes,
   CheckCircle2,
+  Clock,
   Eye,
+  QrCode,
   UserCheck,
+  Wallet,
   Wrench,
 } from 'lucide-react';
 import type { AppStateData } from '../types/asset';
-import { computeDashboardMetrics, formatRupiah } from '../utils/assetLogic';
+import { computeDashboardMetrics, formatDateId, formatRupiah } from '../utils/assetLogic';
 import { ConditionBadge } from './StatusBadge';
 
 interface DashboardViewProps {
@@ -46,7 +50,6 @@ export function DashboardView({
     ...metrics.categoryStats.map((c) => c.total),
   );
 
-  // Compute SVG Donut segments
   const donutTotal = Math.max(1, metrics.totalAssets);
   const radius = 56;
   const circumference = 2 * Math.PI * radius;
@@ -154,6 +157,67 @@ export function DashboardView({
               <span>Lihat tiket servis</span>
               <ArrowUpRight className="h-3 w-3" />
             </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Operational & SLA Strip (PRD Section 8.3 & 16) */}
+      <section aria-label="Metrik Efisiensi Operasional Pemeliharaan">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3.5">
+            <div>
+              <p className="text-xs font-medium text-slate-500">
+                Rata-rata Waktu Perbaikan (MTTR)
+              </p>
+              <p className="mt-1 font-mono text-lg font-bold text-slate-900 tabular-nums">
+                {metrics.mttrDays} hari
+              </p>
+            </div>
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#1E3A8A]">
+              <Clock className="h-4 w-4" />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3.5">
+            <div>
+              <p className="text-xs font-medium text-slate-500">
+                Cakupan Pelabelan QR Inventaris
+              </p>
+              <p className="mt-1 font-mono text-lg font-bold text-emerald-700 tabular-nums">
+                {metrics.qrCoveragePercent}%
+              </p>
+            </div>
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+              <QrCode className="h-4 w-4" />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3.5">
+            <div>
+              <p className="text-xs font-medium text-slate-500">
+                Akumulasi Biaya Pemeliharaan
+              </p>
+              <p className="mt-1 font-mono text-lg font-bold text-slate-900 tabular-nums">
+                {formatRupiah(metrics.totalMaintenanceCost)}
+              </p>
+            </div>
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
+              <Wallet className="h-4 w-4" />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3.5">
+            <div>
+              <p className="text-xs font-medium text-slate-500">
+                Kandidat Relokasi Menganggur (≥30h)
+              </p>
+              <p className="mt-1 font-mono text-lg font-bold text-[#1E3A8A] tabular-nums">
+                {metrics.idleAssets.length} unit
+              </p>
+            </div>
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-50 text-sky-700">
+              <ArrowRightLeft className="h-4 w-4" />
+            </div>
           </div>
         </div>
       </section>
@@ -353,8 +417,7 @@ export function DashboardView({
               Peringatan & Rekomendasi Cerdas (Smart Insight)
             </h2>
             <p className="text-xs text-slate-500">
-              Deteksi otomatis aset dengan riwayat kerusakan berulang (≥ 2 kali)
-              atau kondisi Rusak Berat sebagai prioritas evaluasi BMD
+              Deteksi otomatis kerusakan berulang (≥2x), ≥3x dalam 6 bulan, biaya servis &gt;50% nilai perolehan, atau kondisi Rusak Berat
             </p>
           </div>
           <span className="font-mono text-xs font-medium text-slate-600 tabular-nums">
@@ -368,9 +431,9 @@ export function DashboardView({
               <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-600">
                 <th className="px-5 py-3">Kode BMD / Aset</th>
                 <th className="px-4 py-3">Jenis & Lokasi</th>
-                <th className="px-4 py-3">Kondisi</th>
+                <th className="px-4 py-3">Kondisi & Prioritas</th>
                 <th className="px-4 py-3 text-right">Frek. Kerusakan</th>
-                <th className="px-4 py-3 text-right">Akumulasi Servis</th>
+                <th className="px-4 py-3 text-right">Biaya Servis (% Nilai)</th>
                 <th className="px-4 py-3">Alasan & Rekomendasi BMD</th>
                 <th className="px-5 py-3 text-right">Aksi</th>
               </tr>
@@ -405,14 +468,37 @@ export function DashboardView({
                       </p>
                       <p className="mt-0.5">{item.asset.lokasiPenempatan}</p>
                     </td>
-                    <td className="px-4 py-3.5 align-top">
+                    <td className="px-4 py-3.5 align-top space-y-1">
                       <ConditionBadge condition={item.asset.kondisi} />
+                      <p
+                        className={`text-[11px] font-semibold ${
+                          item.priority === 'Tinggi'
+                            ? 'text-red-700'
+                            : 'text-amber-700'
+                        }`}
+                      >
+                        Prioritas {item.priority}
+                      </p>
                     </td>
                     <td className="px-4 py-3.5 align-top text-right font-mono text-xs font-semibold text-slate-900 tabular-nums">
-                      {item.repairCount}x kejadian
+                      <p>{item.repairCount}x total</p>
+                      {item.recent6MonthCount > 0 && (
+                        <p className="mt-0.5 text-[11px] font-normal text-slate-500">
+                          ({item.recent6MonthCount}x / 6 bln)
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3.5 align-top text-right font-mono text-xs font-medium text-slate-700 tabular-nums">
-                      {formatRupiah(item.totalRepairCost)}
+                      <p>{formatRupiah(item.totalRepairCost)}</p>
+                      <p
+                        className={`mt-0.5 text-[11px] font-semibold ${
+                          item.costRatioPercent > 50
+                            ? 'text-red-700'
+                            : 'text-slate-500'
+                        }`}
+                      >
+                        {item.costRatioPercent}% nilai perolehan
+                      </p>
                     </td>
                     <td className="px-4 py-3.5 align-top text-xs">
                       <p className="font-semibold text-slate-800">
@@ -437,6 +523,67 @@ export function DashboardView({
               )}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      {/* Smart Relocation Card for Idle Assets (PRD Section 8.3) */}
+      <section className="rounded-xl border border-slate-200 bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+          <div className="flex items-center gap-2.5">
+            <ArrowRightLeft className="h-4 w-4 text-[#1E3A8A]" />
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">
+                Rekomendasi Relokasi Aset Menganggur (Smart Relocation)
+              </h2>
+              <p className="text-xs text-slate-500">
+                Aset berstatus Tersedia (tidak dipegang PIC) selama ≥30 hari yang layak direalokasikan antar-bidang/UPTD
+              </p>
+            </div>
+          </div>
+          <span className="font-mono text-xs font-semibold text-[#1E3A8A] tabular-nums">
+            {metrics.idleAssets.length} kandidat relokasi
+          </span>
+        </div>
+
+        <div className="divide-y divide-slate-200">
+          {metrics.idleAssets.length === 0 ? (
+            <p className="px-5 py-6 text-center text-xs text-slate-500">
+              Seluruh aset siap pakai telah terdistribusi ke PIC atau baru saja kembali ke gudang (&lt;30 hari).
+            </p>
+          ) : (
+            metrics.idleAssets.map((item) => (
+              <div
+                key={item.asset.id}
+                className="flex flex-wrap items-center justify-between gap-4 px-5 py-3.5 hover:bg-slate-50/70 transition-colors"
+              >
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-slate-900">
+                      {item.asset.nama}
+                    </span>
+                    <span className="font-mono text-xs text-slate-500 tabular-nums">
+                      {item.asset.kodeBarangBmd} · NUP {item.asset.nup}
+                    </span>
+                    <span className="rounded bg-sky-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-sky-800 border border-sky-200 tabular-nums">
+                      Menganggur {item.idleDays} hari
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    {item.recommendation} (Terakhir aktif/tercatat: {formatDateId(item.lastUsedDate)})
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => onOpenAssetDetail(item.asset.id)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#1E3A8A] hover:border-[#1E3A8A] hover:bg-blue-50 whitespace-nowrap"
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  <span>Tinjau & Mutasi PIC</span>
+                </button>
+              </div>
+            ))
+          )}
         </div>
       </section>
     </div>

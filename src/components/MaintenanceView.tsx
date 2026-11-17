@@ -1,11 +1,22 @@
 import { useState } from 'react';
-import { AlertTriangle, CheckCircle2, Eye, Play, Wrench } from 'lucide-react';
-import type { AppStateData, MaintenanceRecord } from '../types/asset';
-import { formatDateId, formatRupiah } from '../utils/assetLogic';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Eye,
+  Paperclip,
+  Play,
+} from 'lucide-react';
+import type { AppStateData, MaintenanceRecord, UserRole } from '../types/asset';
+import {
+  formatDateId,
+  formatRupiah,
+  getRolePermissions,
+} from '../utils/assetLogic';
 import { ConditionBadge, TicketStatusBadge } from './StatusBadge';
 
 interface MaintenanceViewProps {
   data: AppStateData;
+  userRole: UserRole;
   onOpenReportDamage: () => void;
   onOpenResolveModal: (ticket: MaintenanceRecord) => void;
   onStartProgress: (ticketId: string) => void;
@@ -14,6 +25,7 @@ interface MaintenanceViewProps {
 
 export function MaintenanceView({
   data,
+  userRole,
   onOpenReportDamage,
   onOpenResolveModal,
   onStartProgress,
@@ -21,6 +33,7 @@ export function MaintenanceView({
 }: MaintenanceViewProps) {
   const [filterTab, setFilterTab] = useState<'ALL' | 'OPEN' | 'DONE'>('ALL');
   const assetMap = new Map(data.assets.map((a) => [a.id, a]));
+  const permissions = getRolePermissions(userRole);
 
   const openTickets = data.maintenance.filter(
     (m) => m.statusTiket !== 'Selesai',
@@ -104,7 +117,8 @@ export function MaintenanceView({
           <button
             type="button"
             onClick={onOpenReportDamage}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700 whitespace-nowrap"
+            disabled={!permissions.canReportDamage}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-45 whitespace-nowrap"
           >
             <AlertTriangle className="h-3.5 w-3.5" />
             <span>Laporkan Kerusakan</span>
@@ -141,6 +155,9 @@ export function MaintenanceView({
                 displayedTickets.map((ticket) => {
                   const asset = assetMap.get(ticket.assetId);
                   const isOpen = ticket.statusTiket !== 'Selesai';
+                  const hasAttachment = Boolean(
+                    ticket.fotoKerusakanUrl || ticket.fotoPerbaikanUrl,
+                  );
                   return (
                     <tr
                       key={ticket.id}
@@ -174,6 +191,12 @@ export function MaintenanceView({
                             Tindakan: {ticket.tindakanPerbaikan}
                           </p>
                         )}
+                        {hasAttachment && (
+                          <span className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-[#1E3A8A]">
+                            <Paperclip className="h-3 w-3" />
+                            Lampiran foto/nota tersedia
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3.5 align-top text-xs text-slate-700">
                         <p className="font-medium text-slate-900">
@@ -193,17 +216,18 @@ export function MaintenanceView({
                       </td>
                       <td className="px-5 py-3.5 align-top text-right">
                         <div className="flex flex-wrap items-center justify-end gap-1.5">
-                          {ticket.statusTiket === 'Menunggu Perbaikan' && (
-                            <button
-                              type="button"
-                              onClick={() => onStartProgress(ticket.id)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 whitespace-nowrap"
-                            >
-                              <Play className="h-3 w-3" />
-                              <span>Proses Servis</span>
-                            </button>
-                          )}
-                          {isOpen && (
+                          {ticket.statusTiket === 'Menunggu Perbaikan' &&
+                            permissions.canResolveMaintenance && (
+                              <button
+                                type="button"
+                                onClick={() => onStartProgress(ticket.id)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 whitespace-nowrap"
+                              >
+                                <Play className="h-3 w-3" />
+                                <span>Proses Servis</span>
+                              </button>
+                            )}
+                          {isOpen && permissions.canResolveMaintenance && (
                             <button
                               type="button"
                               onClick={() => onOpenResolveModal(ticket)}

@@ -2,6 +2,7 @@ export type UserRole =
   | 'Admin / Pranata Komputer'
   | 'Pengurus Barang'
   | 'Teknisi'
+  | 'Pemakai (PIC)'
   | 'Pimpinan';
 
 export type AssetCondition = 'Baik' | 'Rusak Ringan' | 'Rusak Berat';
@@ -58,6 +59,8 @@ export interface PicHistoryEntry {
   nomorBast: string;
   kondisiSerahTerima: AssetCondition;
   catatan: string;
+  fileBastUrl?: string;
+  fileBastNama?: string;
 }
 
 export interface MaintenanceRecord {
@@ -68,12 +71,16 @@ export interface MaintenanceRecord {
   pelaporNama: string;
   tingkatKerusakan: 'Rusak Ringan' | 'Rusak Berat';
   deskripsiKerusakan: string;
+  fotoKerusakanUrl?: string;
+  fotoKerusakanNama?: string;
   statusTiket: TicketStatus;
   tanggalPerbaikan: string | null;
   tindakanPerbaikan: string;
   teknisiVendor: string;
   biayaServis: number;
   kondisiAkhir: AssetCondition | null;
+  fotoPerbaikanUrl?: string;
+  fotoPerbaikanNama?: string;
 }
 
 export interface Asset {
@@ -92,7 +99,30 @@ export interface Asset {
   statusPemakaian: AssetUsageStatus;
   picAktifId: string | null;
   spesifikasi: Record<string, string>;
+  fotoAsetUrl?: string;
+  fotoAsetNama?: string;
+  terakhirDiinspeksi?: string;
   createdAt: string;
+}
+
+export type AuditEntityType =
+  | 'Aset'
+  | 'Jenis Aset'
+  | 'Bidang'
+  | 'Pegawai'
+  | 'Serah Terima PIC'
+  | 'Pemeliharaan'
+  | 'Sistem';
+
+export interface AuditLogEntry {
+  id: string;
+  timestamp: string;
+  actorRole: UserRole;
+  actorName: string;
+  aksi: string;
+  entitas: AuditEntityType;
+  entitasId: string;
+  detailPerubahan: string;
 }
 
 export interface AppStateData {
@@ -102,6 +132,7 @@ export interface AppStateData {
   assets: Asset[];
   picHistory: PicHistoryEntry[];
   maintenance: MaintenanceRecord[];
+  auditLogs: AuditLogEntry[];
 }
 
 export type ActiveMenu =
@@ -112,4 +143,5 @@ export type ActiveMenu =
   | 'master-categories'
   | 'handover'
   | 'maintenance'
-  | 'reports';
+  | 'reports'
+  | 'audit-backup';

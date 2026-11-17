@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X } from 'lucide-react';
+import { Camera, Trash2, X } from 'lucide-react';
 import type {
   Asset,
   AssetCategory,
@@ -7,6 +7,7 @@ import type {
   Employee,
   UnitKerjaItem,
 } from '../types/asset';
+import { readAttachmentFile } from '../utils/fileHelper';
 
 interface AddAssetModalProps {
   categories: AssetCategory[];
@@ -47,6 +48,8 @@ export function AddAssetModal({
   const [picAktifId, setPicAktifId] = useState<string>('');
   const [nomorBast, setNomorBast] = useState('');
   const [spesifikasi, setSpesifikasi] = useState<Record<string, string>>({});
+  const [fotoAsetUrl, setFotoAsetUrl] = useState<string>('');
+  const [fotoAsetNama, setFotoAsetNama] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState('');
 
   const selectedCategory = categories.find((c) => c.id === categoryId);
@@ -82,10 +85,27 @@ export function AddAssetModal({
         statusPemakaian: picAktifId ? 'Dipakai PIC' : 'Tersedia',
         picAktifId: picAktifId || null,
         spesifikasi,
+        fotoAsetUrl: fotoAsetUrl || undefined,
+        fotoAsetNama: fotoAsetNama || undefined,
       },
       nomorBast,
     );
     onClose();
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const encoded = await readAttachmentFile(file, false);
+      setFotoAsetUrl(encoded.dataUrl);
+      setFotoAsetNama(encoded.fileName);
+      setErrorMsg('');
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? err.message : 'Gagal mengunggah foto aset.',
+      );
+    }
   };
 
   return (
@@ -405,6 +425,55 @@ export function AddAssetModal({
               </div>
             </div>
           )}
+
+          {/* Foto Fisik Aset */}
+          <div className="border-t border-slate-200 pt-4">
+            <label
+              htmlFor="add-asset-photo"
+              className="mb-1.5 block text-xs font-semibold text-slate-700"
+            >
+              Foto Fisik Aset (Opsional · JPG/PNG)
+            </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <label
+                htmlFor="add-asset-photo"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
+              >
+                <Camera className="h-3.5 w-3.5" />
+                <span>{fotoAsetUrl ? 'Ganti Foto Fisik' : 'Unggah Foto Fisik'}</span>
+              </label>
+              <input
+                id="add-asset-photo"
+                type="file"
+                accept="image/*"
+                onChange={handlePhotoUpload}
+                className="hidden"
+              />
+              {fotoAsetUrl && (
+                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1.5 pr-2.5">
+                  <img
+                    src={fotoAsetUrl}
+                    alt="Pratinjau foto fisik aset"
+                    className="h-10 w-10 rounded object-cover"
+                  />
+                  <span className="max-w-[160px] truncate text-xs text-slate-700">
+                    {fotoAsetNama}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFotoAsetUrl('');
+                      setFotoAsetNama('');
+                    }}
+                    aria-label="Hapus foto aset"
+                    className="text-slate-400 hover:text-red-600"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
 
           <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4">
             <button

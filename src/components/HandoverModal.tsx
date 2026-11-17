@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { ArrowLeftRight, X } from 'lucide-react';
+import { ArrowLeftRight, FileText, Paperclip, Trash2, X } from 'lucide-react';
 import type { Asset, AssetCondition, Employee } from '../types/asset';
 import type { HandoverParams } from '../utils/assetLogic';
+import { readAttachmentFile } from '../utils/fileHelper';
 
 interface HandoverModalProps {
   assets: Asset[];
@@ -40,6 +41,8 @@ export function HandoverModal({
     initialAsset?.lokasiPenempatan ?? '',
   );
   const [catatan, setCatatan] = useState('');
+  const [fileBastUrl, setFileBastUrl] = useState('');
+  const [fileBastNama, setFileBastNama] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
   const selectedAsset = assets.find((a) => a.id === assetId);
@@ -81,8 +84,27 @@ export function HandoverModal({
       kondisiSerahTerima,
       lokasiPenempatanBaru: lokasiPenempatanBaru.trim(),
       catatan: catatan.trim(),
+      fileBastUrl: fileBastUrl || undefined,
+      fileBastNama: fileBastNama || undefined,
     });
     onClose();
+  };
+
+  const handleBastFileUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const encoded = await readAttachmentFile(file, true);
+      setFileBastUrl(encoded.dataUrl);
+      setFileBastNama(encoded.fileName);
+      setErrorMsg('');
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? err.message : 'Gagal mengunggah file scan BAST.',
+      );
+    }
   };
 
   return (
@@ -268,6 +290,48 @@ export function HandoverModal({
               placeholder="Contoh: Mutasi operasional penugasan bidang sumber daya air..."
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-[#1E3A8A] focus:outline-none"
             />
+          </div>
+
+          <div>
+            <label
+              htmlFor="handover-bast-file"
+              className="mb-1.5 block text-xs font-semibold text-slate-700"
+            >
+              Unggah File Scan BAST (Opsional · PDF / Gambar)
+            </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <label
+                htmlFor="handover-bast-file"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
+              >
+                <Paperclip className="h-3.5 w-3.5" />
+                <span>{fileBastUrl ? 'Ganti Scan BAST' : 'Pilih Berkas Scan BAST'}</span>
+              </label>
+              <input
+                id="handover-bast-file"
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={handleBastFileUpload}
+                className="hidden"
+              />
+              {fileBastUrl && (
+                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700">
+                  <FileText className="h-3.5 w-3.5 text-[#1E3A8A]" />
+                  <span className="max-w-[180px] truncate">{fileBastNama}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFileBastUrl('');
+                      setFileBastNama('');
+                    }}
+                    aria-label="Hapus lampiran BAST"
+                    className="text-slate-400 hover:text-red-600"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4">

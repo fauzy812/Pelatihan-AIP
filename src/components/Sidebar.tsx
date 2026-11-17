@@ -10,6 +10,7 @@ import {
   Layers,
   LayoutDashboard,
   ScanLine,
+  ShieldCheck,
   Users,
   Wrench,
   X,
@@ -53,6 +54,7 @@ const PRIMARY_ITEMS_AFTER: {
   { id: 'handover', label: 'Serah Terima & PIC', icon: ArrowLeftRight },
   { id: 'maintenance', label: 'Kerusakan & Perbaikan', icon: Wrench },
   { id: 'reports', label: 'Laporan & Ekspor', icon: FileBarChart2 },
+  { id: 'audit-backup', label: 'Audit & Backup', icon: ShieldCheck },
 ];
 
 export function Sidebar({

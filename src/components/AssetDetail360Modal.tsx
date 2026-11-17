@@ -2,9 +2,15 @@ import { useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeftRight,
+  Camera,
   CheckCircle2,
+  Download,
+  Edit3,
+  FileText,
+  Image as ImageIcon,
   PackageCheck,
   Printer,
+  Save,
   ScanLine,
   UserCheck,
   Wrench,
@@ -12,9 +18,19 @@ import {
 } from 'lucide-react';
 import type {
   AppStateData,
+  AssetCondition,
   MaintenanceRecord,
+  PicHistoryEntry,
+  UserRole,
 } from '../types/asset';
-import { formatDateId, formatRupiah } from '../utils/assetLogic';
+import {
+  formatDateId,
+  formatRupiah,
+  getRolePermissions,
+  type UpdateAssetDetailsParams,
+} from '../utils/assetLogic';
+import { readAttachmentFile } from '../utils/fileHelper';
+import { BastPrintModal } from './BastPrintModal';
 import { AssetQrSvg, QrStickerPrintModal } from './QrCodeDisplay';
 import {
   ConditionBadge,
@@ -25,7 +41,9 @@ import {
 interface AssetDetail360ModalProps {
   assetId: string;
   data: AppStateData;
+  userRole: UserRole;
   onClose: () => void;
+  onUpdateAssetDetails: (params: UpdateAssetDetailsParams) => void;
   onOpenHandoverForAsset: (assetId: string) => void;
   onReturnAssetToPool: (assetId: string) => void;
   onOpenReportDamageForAsset: (assetId: string) => void;
@@ -35,10 +53,18 @@ interface AssetDetail360ModalProps {
 
 type DetailTab = 'info' | 'pic' | 'maintenance';
 
+interface AttachmentPreview {
+  title: string;
+  dataUrl: string;
+  fileName: string;
+}
+
 export function AssetDetail360Modal({
   assetId,
   data,
+  userRole,
   onClose,
+  onUpdateAssetDetails,
   onOpenHandoverForAsset,
   onReturnAssetToPool,
   onOpenReportDamageForAsset,
@@ -47,9 +73,32 @@ export function AssetDetail360Modal({
 }: AssetDetail360ModalProps) {
   const [activeTab, setActiveTab] = useState<DetailTab>('info');
   const [showQrSticker, setShowQrSticker] = useState(false);
+  const [bastPrintEntry, setBastPrintEntry] = useState<PicHistoryEntry | null>(
+    null,
+  );
+  const [attachmentPreview, setAttachmentPreview] =
+    useState<AttachmentPreview | null>(null);
 
   const asset = data.assets.find((a) => a.id === assetId);
   if (!asset) return null;
+
+  const permissions = getRolePermissions(userRole);
+  const canEditInspection =
+    permissions.canCrudAssets || permissions.canResolveMaintenance;
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editLokasi, setEditLokasi] = useState(asset.lokasiPenempatan);
+  const [editKondisi, setEditKondisi] = useState<AssetCondition>(asset.kondisi);
+  const [editSpecs, setEditSpecs] = useState<Record<string, string>>({
+    ...asset.spesifikasi,
+  });
+  const [editPhotoUrl, setEditPhotoUrl] = useState<string | undefined>(
+    asset.fotoAsetUrl,
+  );
+  const [editPhotoName, setEditPhotoName] = useState<string | undefined>(
+    asset.fotoAsetNama,
+  );
+  const [photoError, setPhotoError] = useState('');
 
   const category = data.categories.find((c) => c.id === asset.categoryId);
   const activePic = asset.picAktifId
@@ -77,6 +126,49 @@ export function AssetDetail360Modal({
 
   const qrPayload = `SI-ASET|DPUBMSDA-SDA|${asset.kodeBarangBmd}|NUP:${asset.nup}|${asset.id}`;
 
+  const handleStartEdit = () => {
+    setEditLokasi(asset.lokasiPenempatan);
+    setEditKondisi(asset.kondisi);
+    setEditSpecs({ ...asset.spesifikasi });
+    setEditPhotoUrl(asset.fotoAsetUrl);
+    setEditPhotoName(asset.fotoAsetNama);
+    setPhotoError('');
+    setIsEditing(true);
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const encoded = await readAttachmentFile(file, false);
+      setEditPhotoUrl(encoded.dataUrl);
+      setEditPhotoName(encoded.fileName);
+      setPhotoError('');
+    } catch (err) {
+      setPhotoError(
+        err instanceof Error ? err.message : 'Gagal memuat foto aset.',
+      );
+    }
+  };
+
+  const handleSaveInspection = (e: React.FormEvent) => {
+    e.preventDefault();
+    onUpdateAssetDetails({
+      assetId: asset.id,
+      lokasiPenempatan: editLokasi,
+      kondisi: editKondisi,
+      fotoAsetUrl: editPhotoUrl,
+      fotoAsetNama: editPhotoName,
+      spesifikasi: editSpecs,
+      terakhirDiinspeksi: new Date().toISOString().slice(0, 10),
+    });
+    setIsEditing(false);
+  };
+
+  const bastRecipient = bastPrintEntry
+    ? employeeMap.get(bastPrintEntry.employeeId)
+    : undefined;
+
   return (
     <>
       <div
@@ -89,45 +181,73 @@ export function AssetDetail360Modal({
           {/* Header Profil 360° */}
           <div className="border-b border-slate-200 bg-slate-50/70 px-6 py-5">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0 flex-1 space-y-2">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                  <span className="font-mono font-semibold text-[#1E3A8A] tabular-nums">
-                    {asset.kodeBarangBmd}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span className="font-mono font-semibold text-slate-800 tabular-nums">
-                    NUP {asset.nup}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span className="font-medium text-slate-700">
-                    {category?.nama ?? 'Lainnya'}
-                  </span>
-                </div>
+              <div className="flex min-w-0 flex-1 items-start gap-4">
+                {asset.fotoAsetUrl && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAttachmentPreview({
+                        title: `Foto Fisik: ${asset.nama}`,
+                        dataUrl: asset.fotoAsetUrl!,
+                        fileName: asset.fotoAsetNama ?? `${asset.nup}.jpg`,
+                      })
+                    }
+                    className="hidden h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white hover:border-[#1E3A8A] sm:block"
+                    title="Perbesar foto fisik aset"
+                  >
+                    <img
+                      src={asset.fotoAsetUrl}
+                      alt={asset.nama}
+                      className="h-full w-full object-cover"
+                    />
+                  </button>
+                )}
 
-                <h2
-                  id="detail-360-title"
-                  className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl"
-                >
-                  {asset.nama}
-                </h2>
-                <p className="text-sm text-slate-600">
-                  {asset.merkTipe} · {asset.unitKerja} · {asset.lokasiPenempatan}
-                </p>
-
-                <div className="flex flex-wrap items-center gap-2.5 pt-1">
-                  <ConditionBadge
-                    condition={asset.kondisi}
-                    inRepair={Boolean(openTicket)}
-                  />
-                  <UsageStatusBadge status={asset.statusPemakaian} />
-                  {activePic && (
-                    <span className="text-xs text-slate-700">
-                      PIC Aktif:{' '}
-                      <span className="font-semibold text-slate-900">
-                        {activePic.nama}
-                      </span>
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                    <span className="font-mono font-semibold text-[#1E3A8A] tabular-nums">
+                      {asset.kodeBarangBmd}
                     </span>
-                  )}
+                    <span aria-hidden="true">·</span>
+                    <span className="font-mono font-semibold text-slate-800 tabular-nums">
+                      NUP {asset.nup}
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span className="font-medium text-slate-700">
+                      {category?.nama ?? 'Lainnya'}
+                    </span>
+                  </div>
+
+                  <h2
+                    id="detail-360-title"
+                    className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl"
+                  >
+                    {asset.nama}
+                  </h2>
+                  <p className="text-sm text-slate-600">
+                    {asset.merkTipe} · {asset.unitKerja} · {asset.lokasiPenempatan}
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                    <ConditionBadge
+                      condition={asset.kondisi}
+                      inRepair={Boolean(openTicket)}
+                    />
+                    <UsageStatusBadge status={asset.statusPemakaian} />
+                    {activePic && (
+                      <span className="text-xs text-slate-700">
+                        PIC Aktif:{' '}
+                        <span className="font-semibold text-slate-900">
+                          {activePic.nama}
+                        </span>
+                      </span>
+                    )}
+                    {asset.terakhirDiinspeksi && (
+                      <span className="font-mono text-[11px] text-slate-500">
+                        Inspeksi: {formatDateId(asset.terakhirDiinspeksi)}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -186,7 +306,7 @@ export function AssetDetail360Modal({
                     : 'border-transparent text-slate-600 hover:text-slate-900'
                 }`}
               >
-                1. Informasi Umum & Spesifikasi
+                1. Informasi Umum &amp; Spesifikasi
               </button>
               <button
                 type="button"
@@ -212,7 +332,7 @@ export function AssetDetail360Modal({
                     : 'border-transparent text-slate-600 hover:text-slate-900'
                 }`}
               >
-                3. Riwayat Kerusakan & Perbaikan ({maintenanceTimeline.length})
+                3. Riwayat Kerusakan &amp; Perbaikan ({maintenanceTimeline.length})
               </button>
             </div>
           </div>
@@ -220,93 +340,278 @@ export function AssetDetail360Modal({
           {/* Tab Content Body */}
           <div className="flex-1 overflow-y-auto p-6">
             {activeTab === 'info' && (
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                <div className="space-y-3">
-                  <h3 className="text-sm font-bold text-slate-900">
-                    Identitas & Nilai Barang Milik Daerah
-                  </h3>
-                  <dl className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-                    <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
-                      <dt className="text-slate-500">Kode Barang BMD</dt>
-                      <dd className="font-mono font-semibold text-slate-900 tabular-nums">
-                        {asset.kodeBarangBmd}
-                      </dd>
-                    </div>
-                    <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
-                      <dt className="text-slate-500">NUP</dt>
-                      <dd className="font-mono font-semibold text-slate-900 tabular-nums">
-                        {asset.nup}
-                      </dd>
-                    </div>
-                    <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
-                      <dt className="text-slate-500">Merk / Tipe</dt>
-                      <dd className="font-medium text-slate-900 text-right">
-                        {asset.merkTipe}
-                      </dd>
-                    </div>
-                    <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
-                      <dt className="text-slate-500">Nomor Seri / Rangka</dt>
-                      <dd className="font-mono font-medium text-slate-900">
-                        {asset.nomorSeriRangka}
-                      </dd>
-                    </div>
-                    <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
-                      <dt className="text-slate-500">Tahun Perolehan</dt>
-                      <dd className="font-mono font-semibold text-slate-900 tabular-nums">
-                        {asset.tahunPerolehan}
-                      </dd>
-                    </div>
-                    <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
-                      <dt className="text-slate-500">Nilai Perolehan</dt>
-                      <dd className="font-mono font-semibold text-slate-900 tabular-nums">
-                        {formatRupiah(asset.nilaiPerolehan)}
-                      </dd>
-                    </div>
-                    <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
-                      <dt className="text-slate-500">Total Biaya Pemeliharaan</dt>
-                      <dd className="font-mono font-semibold text-slate-900 tabular-nums">
-                        {formatRupiah(totalServiceCost)}
-                      </dd>
-                    </div>
-                  </dl>
+              <div className="space-y-5">
+                {/* Action Bar for Periodic Inspection / Photo Update (FR-04) */}
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="text-xs text-slate-600">
+                    <span className="font-semibold text-slate-800">
+                      Pemantauan Kondisi &amp; Foto Fisik Aset:
+                    </span>{' '}
+                    {asset.fotoAsetUrl
+                      ? `Foto tersedia (${asset.fotoAsetNama ?? 'lampiran.jpg'})`
+                      : 'Belum ada foto fisik diunggah'}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {asset.fotoAsetUrl && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAttachmentPreview({
+                            title: `Foto Fisik: ${asset.nama}`,
+                            dataUrl: asset.fotoAsetUrl!,
+                            fileName: asset.fotoAsetNama ?? `${asset.nup}.jpg`,
+                          })
+                        }
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-[#1E3A8A] hover:text-[#1E3A8A]"
+                      >
+                        <ImageIcon className="h-3.5 w-3.5" />
+                        <span>Lihat Foto Fisik</span>
+                      </button>
+                    )}
+                    {!isEditing && (
+                      <button
+                        type="button"
+                        onClick={handleStartEdit}
+                        disabled={!canEditInspection}
+                        title={
+                          canEditInspection
+                            ? 'Perbarui kondisi, lokasi, atau foto fisik aset'
+                            : 'Hanya Admin, Pengurus Barang, atau Teknisi yang dapat memperbarui inspeksi aset'
+                        }
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-[#1E3A8A] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-900 disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                        <span>Edit / Inspeksi Kondisi</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                <div className="space-y-3">
-                  <h3 className="text-sm font-bold text-slate-900">
-                    Spesifikasi Teknis ({category?.nama ?? 'Umum'})
-                  </h3>
-                  <dl className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-                    {category && category.fields.length > 0 ? (
-                      category.fields.map((field) => (
-                        <div
-                          key={field.key}
-                          className="flex justify-between gap-4 px-4 py-2.5 text-xs"
+                {isEditing ? (
+                  <form
+                    onSubmit={handleSaveInspection}
+                    className="space-y-4 rounded-xl border border-blue-200 bg-blue-50/30 p-5"
+                  >
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Formulir Inspeksi Berkala &amp; Pembaruan Data Aset
+                    </h3>
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label
+                          htmlFor="inspect-condition"
+                          className="mb-1 block text-xs font-semibold text-slate-700"
                         >
-                          <dt className="text-slate-500">{field.label}</dt>
-                          <dd className="font-medium text-slate-900 text-right">
-                            {asset.spesifikasi[field.key] || '-'}
-                          </dd>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="px-4 py-6 text-center text-xs text-slate-500">
-                        Tidak ada atribut spesifikasi khusus untuk kategori ini.
+                          Kondisi Terkini Hasil Inspeksi
+                        </label>
+                        <select
+                          id="inspect-condition"
+                          value={editKondisi}
+                          onChange={(e) =>
+                            setEditKondisi(e.target.value as AssetCondition)
+                          }
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-[#1E3A8A] focus:outline-none"
+                        >
+                          <option value="Baik">Baik</option>
+                          <option value="Rusak Ringan">Rusak Ringan</option>
+                          <option value="Rusak Berat">Rusak Berat</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="inspect-location"
+                          className="mb-1 block text-xs font-semibold text-slate-700"
+                        >
+                          Lokasi Penempatan Aktual
+                        </label>
+                        <input
+                          id="inspect-location"
+                          type="text"
+                          value={editLokasi}
+                          onChange={(e) => setEditLokasi(e.target.value)}
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-[#1E3A8A] focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {category && category.fields.length > 0 && (
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {category.fields.map((field) => (
+                          <div key={field.key}>
+                            <label
+                              htmlFor={`edit-spec-${field.key}`}
+                              className="mb-1 block text-xs font-semibold text-slate-700"
+                            >
+                              {field.label}
+                            </label>
+                            <input
+                              id={`edit-spec-${field.key}`}
+                              type="text"
+                              value={editSpecs[field.key] ?? ''}
+                              onChange={(e) =>
+                                setEditSpecs((prev) => ({
+                                  ...prev,
+                                  [field.key]: e.target.value,
+                                }))
+                              }
+                              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-[#1E3A8A] focus:outline-none"
+                            />
+                          </div>
+                        ))}
                       </div>
                     )}
-                    <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
-                      <dt className="text-slate-500">Bidang / UPTD</dt>
-                      <dd className="font-medium text-slate-900 text-right">
-                        {asset.unitKerja}
-                      </dd>
+
+                    <div>
+                      <label
+                        htmlFor="inspect-photo"
+                        className="mb-1 block text-xs font-semibold text-slate-700"
+                      >
+                        Unggah / Perbarui Foto Fisik Aset
+                      </label>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <label
+                          htmlFor="inspect-photo"
+                          className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:border-[#1E3A8A]"
+                        >
+                          <Camera className="h-3.5 w-3.5 text-[#1E3A8A]" />
+                          <span>
+                            {editPhotoName
+                              ? `Ganti Foto (${editPhotoName})`
+                              : 'Pilih Foto Fisik'}
+                          </span>
+                        </label>
+                        <input
+                          id="inspect-photo"
+                          type="file"
+                          accept="image/*"
+                          onChange={handlePhotoUpload}
+                          className="hidden"
+                        />
+                        {editPhotoUrl && (
+                          <img
+                            src={editPhotoUrl}
+                            alt="Pratinjau foto"
+                            className="h-12 w-12 rounded-lg border border-slate-200 object-cover"
+                          />
+                        )}
+                      </div>
+                      {photoError && (
+                        <p className="mt-1 text-xs font-medium text-red-700">
+                          {photoError}
+                        </p>
+                      )}
                     </div>
-                    <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
-                      <dt className="text-slate-500">Lokasi Penempatan</dt>
-                      <dd className="font-medium text-slate-900 text-right">
-                        {asset.lokasiPenempatan}
-                      </dd>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsEditing(false)}
+                        className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="submit"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-[#1E3A8A] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-900"
+                      >
+                        <Save className="h-3.5 w-3.5" />
+                        <span>Simpan Pembaruan Aset</span>
+                      </button>
                     </div>
-                  </dl>
-                </div>
+                  </form>
+                ) : (
+                  <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                    <div className="space-y-3">
+                      <h3 className="text-sm font-bold text-slate-900">
+                        Identitas &amp; Nilai Barang Milik Daerah
+                      </h3>
+                      <dl className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
+                        <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
+                          <dt className="text-slate-500">Kode Barang BMD</dt>
+                          <dd className="font-mono font-semibold text-slate-900 tabular-nums">
+                            {asset.kodeBarangBmd}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
+                          <dt className="text-slate-500">NUP</dt>
+                          <dd className="font-mono font-semibold text-slate-900 tabular-nums">
+                            {asset.nup}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
+                          <dt className="text-slate-500">Merk / Tipe</dt>
+                          <dd className="font-medium text-slate-900 text-right">
+                            {asset.merkTipe}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
+                          <dt className="text-slate-500">Nomor Seri / Rangka</dt>
+                          <dd className="font-mono font-medium text-slate-900">
+                            {asset.nomorSeriRangka}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
+                          <dt className="text-slate-500">Tahun Perolehan</dt>
+                          <dd className="font-mono font-semibold text-slate-900 tabular-nums">
+                            {asset.tahunPerolehan}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
+                          <dt className="text-slate-500">Nilai Perolehan</dt>
+                          <dd className="font-mono font-semibold text-slate-900 tabular-nums">
+                            {formatRupiah(asset.nilaiPerolehan)}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
+                          <dt className="text-slate-500">
+                            Total Biaya Pemeliharaan
+                          </dt>
+                          <dd className="font-mono font-semibold text-slate-900 tabular-nums">
+                            {formatRupiah(totalServiceCost)}
+                          </dd>
+                        </div>
+                      </dl>
+                    </div>
+
+                    <div className="space-y-3">
+                      <h3 className="text-sm font-bold text-slate-900">
+                        Spesifikasi Teknis ({category?.nama ?? 'Umum'})
+                      </h3>
+                      <dl className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
+                        {category && category.fields.length > 0 ? (
+                          category.fields.map((field) => (
+                            <div
+                              key={field.key}
+                              className="flex justify-between gap-4 px-4 py-2.5 text-xs"
+                            >
+                              <dt className="text-slate-500">{field.label}</dt>
+                              <dd className="font-medium text-slate-900 text-right">
+                                {asset.spesifikasi[field.key] || '-'}
+                              </dd>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="px-4 py-6 text-center text-xs text-slate-500">
+                            Tidak ada atribut spesifikasi khusus untuk kategori ini.
+                          </div>
+                        )}
+                        <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
+                          <dt className="text-slate-500">Bidang / UPTD</dt>
+                          <dd className="font-medium text-slate-900 text-right">
+                            {asset.unitKerja}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4 px-4 py-2.5 text-xs">
+                          <dt className="text-slate-500">Lokasi Penempatan</dt>
+                          <dd className="font-medium text-slate-900 text-right">
+                            {asset.lokasiPenempatan}
+                          </dd>
+                        </div>
+                      </dl>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -326,7 +631,13 @@ export function AssetDetail360Modal({
                       <button
                         type="button"
                         onClick={() => onReturnAssetToPool(asset.id)}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        disabled={!permissions.canHandover}
+                        title={
+                          permissions.canHandover
+                            ? 'Kembalikan aset ke gudang / status Tersedia'
+                            : 'Hanya Admin / Pengurus Barang yang dapat memproses pengembalian'
+                        }
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45"
                       >
                         <PackageCheck className="h-3.5 w-3.5 text-sky-600" />
                         <span>Kembalikan ke Gudang</span>
@@ -335,7 +646,13 @@ export function AssetDetail360Modal({
                     <button
                       type="button"
                       onClick={() => onOpenHandoverForAsset(asset.id)}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#1E3A8A] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-900"
+                      disabled={!permissions.canHandover}
+                      title={
+                        permissions.canHandover
+                          ? 'Proses serah terima / mutasi PIC baru'
+                          : 'Hanya Admin / Pengurus Barang yang dapat memproses mutasi PIC'
+                      }
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#1E3A8A] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-900 disabled:cursor-not-allowed disabled:opacity-45"
                     >
                       <ArrowLeftRight className="h-3.5 w-3.5" />
                       <span>Serah Terima / Ganti PIC</span>
@@ -375,22 +692,37 @@ export function AssetDetail360Modal({
                                 )}
                               </div>
                               <p className="mt-0.5 text-xs text-slate-600">
-                                NIP/ID: <span className="font-mono">{emp?.nip ?? '-'}</span> ·{' '}
-                                {emp?.jabatan ?? '-'} · {emp?.unitKerja ?? '-'}
+                                NIP/ID:{' '}
+                                <span className="font-mono">{emp?.nip ?? '-'}</span>{' '}
+                                · {emp?.jabatan ?? '-'} · {emp?.unitKerja ?? '-'}
                               </p>
                             </div>
-                            <ConditionBadge condition={entry.kondisiSerahTerima} />
+                            <div className="flex items-center gap-2">
+                              <ConditionBadge condition={entry.kondisiSerahTerima} />
+                              <button
+                                type="button"
+                                onClick={() => setBastPrintEntry(entry)}
+                                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-[#1E3A8A] hover:border-[#1E3A8A] hover:bg-blue-50"
+                              >
+                                <Printer className="h-3 w-3" />
+                                <span>Cetak BAST</span>
+                              </button>
+                            </div>
                           </div>
 
                           <div className="mt-3 grid grid-cols-1 gap-2 border-t border-slate-200/80 pt-3 text-xs sm:grid-cols-3">
                             <div>
-                              <span className="text-slate-500">Tanggal Mulai Pakai:</span>
+                              <span className="text-slate-500">
+                                Tanggal Mulai Pakai:
+                              </span>
                               <p className="font-mono font-medium text-slate-900">
                                 {formatDateId(entry.tanggalMulai)}
                               </p>
                             </div>
                             <div>
-                              <span className="text-slate-500">Tanggal Selesai Pakai:</span>
+                              <span className="text-slate-500">
+                                Tanggal Selesai Pakai:
+                              </span>
                               <p
                                 className={`font-mono font-medium ${
                                   isActive ? 'text-[#1E3A8A]' : 'text-slate-900'
@@ -406,11 +738,44 @@ export function AssetDetail360Modal({
                               </p>
                             </div>
                           </div>
-                          {entry.catatan && (
-                            <p className="mt-2 text-xs text-slate-600">
-                              Catatan: {entry.catatan}
-                            </p>
-                          )}
+
+                          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                            {entry.catatan && (
+                              <p className="text-xs text-slate-600">
+                                Catatan: {entry.catatan}
+                              </p>
+                            )}
+                            {entry.fileBastUrl && (
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setAttachmentPreview({
+                                      title: `Scan BAST: ${entry.nomorBast}`,
+                                      dataUrl: entry.fileBastUrl!,
+                                      fileName:
+                                        entry.fileBastNama ??
+                                        `${entry.nomorBast}.pdf`,
+                                    })
+                                  }
+                                  className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-[#1E3A8A] hover:bg-blue-100"
+                                >
+                                  <FileText className="h-3 w-3" />
+                                  <span>Lihat Scan BAST</span>
+                                </button>
+                                <a
+                                  href={entry.fileBastUrl}
+                                  download={
+                                    entry.fileBastNama ?? `${entry.nomorBast}.pdf`
+                                  }
+                                  className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 hover:text-slate-900"
+                                >
+                                  <Download className="h-3 w-3" />
+                                  <span>Unduh</span>
+                                </a>
+                              </div>
+                            )}
+                          </div>
                         </li>
                       );
                     })}
@@ -424,10 +789,10 @@ export function AssetDetail360Modal({
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-bold text-slate-900">
-                      Timeline Riwayat Kerusakan & Perbaikan
+                      Timeline Riwayat Kerusakan &amp; Perbaikan
                     </h3>
                     <p className="text-xs text-slate-500">
-                      Seluruh kejadian kerusakan, tindakan teknis, vendor, dan biaya servis pada unit ini
+                      Seluruh kejadian kerusakan, tindakan teknis, vendor, bukti foto, dan biaya servis pada unit ini
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -435,7 +800,13 @@ export function AssetDetail360Modal({
                       <button
                         type="button"
                         onClick={() => onOpenResolveMaintenance(openTicket)}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
+                        disabled={!permissions.canResolveMaintenance}
+                        title={
+                          permissions.canResolveMaintenance
+                            ? 'Catat penyelesaian perbaikan tiket aktif'
+                            : 'Hanya Admin, Pengurus Barang, atau Teknisi yang dapat menyelesaikan perbaikan'
+                        }
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-45"
                       >
                         <CheckCircle2 className="h-3.5 w-3.5" />
                         <span>Catat Penyelesaian Perbaikan</span>
@@ -444,7 +815,13 @@ export function AssetDetail360Modal({
                     <button
                       type="button"
                       onClick={() => onOpenReportDamageForAsset(asset.id)}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700"
+                      disabled={!permissions.canReportDamage}
+                      title={
+                        permissions.canReportDamage
+                          ? 'Laporkan kerusakan unit aset'
+                          : 'Peran Pimpinan bersifat baca-saja (Viewer)'
+                      }
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-45"
                     >
                       <AlertTriangle className="h-3.5 w-3.5" />
                       <span>Laporkan Kerusakan</span>
@@ -482,7 +859,10 @@ export function AssetDetail360Modal({
                                 {record.deskripsiKerusakan}
                               </p>
                               <p className="mt-0.5 text-xs text-slate-500">
-                                Pelapor: <span className="font-medium text-slate-700">{record.pelaporNama}</span>
+                                Pelapor:{' '}
+                                <span className="font-medium text-slate-700">
+                                  {record.pelaporNama}
+                                </span>
                               </p>
                             </div>
 
@@ -490,7 +870,8 @@ export function AssetDetail360Modal({
                               <button
                                 type="button"
                                 onClick={() => onOpenResolveMaintenance(record)}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 shrink-0"
+                                disabled={!permissions.canResolveMaintenance}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-45 shrink-0"
                               >
                                 <Wrench className="h-3.5 w-3.5" />
                                 <span>Selesaikan Perbaikan</span>
@@ -500,7 +881,9 @@ export function AssetDetail360Modal({
 
                           <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-200/80 pt-3 text-xs sm:grid-cols-4">
                             <div>
-                              <span className="text-slate-500">Tanggal Perbaikan:</span>
+                              <span className="text-slate-500">
+                                Tanggal Perbaikan:
+                              </span>
                               <p className="font-mono font-medium text-slate-900">
                                 {record.tanggalPerbaikan
                                   ? formatDateId(record.tanggalPerbaikan)
@@ -508,7 +891,9 @@ export function AssetDetail360Modal({
                               </p>
                             </div>
                             <div>
-                              <span className="text-slate-500">Teknisi / Vendor:</span>
+                              <span className="text-slate-500">
+                                Teknisi / Vendor:
+                              </span>
                               <p className="font-medium text-slate-900">
                                 {record.teknisiVendor}
                               </p>
@@ -525,7 +910,9 @@ export function AssetDetail360Modal({
                                 {record.kondisiAkhir ? (
                                   <ConditionBadge condition={record.kondisiAkhir} />
                                 ) : (
-                                  <span className="text-slate-500">Menunggu selesai</span>
+                                  <span className="text-slate-500">
+                                    Menunggu selesai
+                                  </span>
                                 )}
                               </div>
                             </div>
@@ -533,9 +920,53 @@ export function AssetDetail360Modal({
 
                           {record.tindakanPerbaikan && (
                             <p className="mt-2.5 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-700">
-                              <span className="font-semibold text-slate-900">Tindakan Perbaikan:</span>{' '}
+                              <span className="font-semibold text-slate-900">
+                                Tindakan Perbaikan:
+                              </span>{' '}
                               {record.tindakanPerbaikan}
                             </p>
+                          )}
+
+                          {(record.fotoKerusakanUrl ||
+                            record.fotoPerbaikanUrl) && (
+                            <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-2.5">
+                              {record.fotoKerusakanUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setAttachmentPreview({
+                                      title: `Bukti Kerusakan (${formatDateId(record.tanggalLapor)})`,
+                                      dataUrl: record.fotoKerusakanUrl!,
+                                      fileName:
+                                        record.fotoKerusakanNama ??
+                                        'bukti-kerusakan.jpg',
+                                    })
+                                  }
+                                  className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100"
+                                >
+                                  <ImageIcon className="h-3 w-3" />
+                                  <span>Lihat Bukti Kerusakan</span>
+                                </button>
+                              )}
+                              {record.fotoPerbaikanUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setAttachmentPreview({
+                                      title: `Bukti Perbaikan / Nota Servis`,
+                                      dataUrl: record.fotoPerbaikanUrl!,
+                                      fileName:
+                                        record.fotoPerbaikanNama ??
+                                        'bukti-perbaikan.jpg',
+                                    })
+                                  }
+                                  className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-900 hover:bg-emerald-100"
+                                >
+                                  <FileText className="h-3 w-3" />
+                                  <span>Lihat Bukti / Nota Perbaikan</span>
+                                </button>
+                              )}
+                            </div>
                           )}
                         </li>
                       );
@@ -554,6 +985,69 @@ export function AssetDetail360Modal({
           categoryName={category?.nama ?? 'Umum'}
           onClose={() => setShowQrSticker(false)}
         />
+      )}
+
+      {bastPrintEntry && (
+        <BastPrintModal
+          asset={asset}
+          categoryName={category?.nama ?? 'Umum'}
+          historyEntry={bastPrintEntry}
+          recipient={bastRecipient}
+          onClose={() => setBastPrintEntry(null)}
+        />
+      )}
+
+      {attachmentPreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/75 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="attachment-preview-title"
+        >
+          <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5">
+              <h4
+                id="attachment-preview-title"
+                className="truncate text-sm font-bold text-slate-900"
+              >
+                {attachmentPreview.title}
+              </h4>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={attachmentPreview.dataUrl}
+                  download={attachmentPreview.fileName}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#1E3A8A] hover:bg-blue-50"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Unduh File</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setAttachmentPreview(null)}
+                  aria-label="Tutup pratinjau lampiran"
+                  className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto bg-slate-100 p-4 flex items-center justify-center">
+              {attachmentPreview.dataUrl.startsWith('data:application/pdf') ? (
+                <iframe
+                  title={attachmentPreview.title}
+                  src={attachmentPreview.dataUrl}
+                  className="h-[68vh] w-full rounded border border-slate-200 bg-white"
+                />
+              ) : (
+                <img
+                  src={attachmentPreview.dataUrl}
+                  alt={attachmentPreview.title}
+                  className="max-h-[68vh] max-w-full rounded border border-slate-200 object-contain bg-white"
+                />
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

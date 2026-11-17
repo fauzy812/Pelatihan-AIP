@@ -3,21 +3,131 @@ import type {
   Asset,
   AssetCategory,
   AssetCondition,
+  AuditEntityType,
+  AuditLogEntry,
   Employee,
   MaintenanceRecord,
   PicHistoryEntry,
   TicketStatus,
   UnitKerjaItem,
+  UserRole,
 } from '../types/asset';
+
+export interface ActorContext {
+  actorRole: UserRole;
+  actorName: string;
+}
+
+const DEFAULT_ACTOR: ActorContext = {
+  actorRole: 'Admin / Pranata Komputer',
+  actorName: 'Sistem SI-ASET',
+};
+
+export interface RolePermissions {
+  canManageMaster: boolean;
+  canCrudAssets: boolean;
+  canHandover: boolean;
+  canReportDamage: boolean;
+  canResolveMaintenance: boolean;
+  canExportReports: boolean;
+  canRestoreBackup: boolean;
+}
+
+export function getRolePermissions(role: UserRole): RolePermissions {
+  switch (role) {
+    case 'Admin / Pranata Komputer':
+      return {
+        canManageMaster: true,
+        canCrudAssets: true,
+        canHandover: true,
+        canReportDamage: true,
+        canResolveMaintenance: true,
+        canExportReports: true,
+        canRestoreBackup: true,
+      };
+    case 'Pengurus Barang':
+      return {
+        canManageMaster: true,
+        canCrudAssets: true,
+        canHandover: true,
+        canReportDamage: true,
+        canResolveMaintenance: true,
+        canExportReports: true,
+        canRestoreBackup: false,
+      };
+    case 'Teknisi':
+      return {
+        canManageMaster: false,
+        canCrudAssets: false,
+        canHandover: false,
+        canReportDamage: true,
+        canResolveMaintenance: true,
+        canExportReports: true,
+        canRestoreBackup: false,
+      };
+    case 'Pemakai (PIC)':
+      return {
+        canManageMaster: false,
+        canCrudAssets: false,
+        canHandover: false,
+        canReportDamage: true,
+        canResolveMaintenance: false,
+        canExportReports: false,
+        canRestoreBackup: false,
+      };
+    case 'Pimpinan':
+    default:
+      return {
+        canManageMaster: false,
+        canCrudAssets: false,
+        canHandover: false,
+        canReportDamage: false,
+        canResolveMaintenance: false,
+        canExportReports: true,
+        canRestoreBackup: false,
+      };
+  }
+}
+
+function appendAuditLog(
+  logs: AuditLogEntry[] | undefined,
+  actor: ActorContext,
+  aksi: string,
+  entitas: AuditEntityType,
+  entitasId: string,
+  detailPerubahan: string,
+): AuditLogEntry[] {
+  const entry: AuditLogEntry = {
+    id: `aud-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    timestamp: new Date().toISOString(),
+    actorRole: actor.actorRole,
+    actorName: actor.actorName,
+    aksi,
+    entitas,
+    entitasId,
+    detailPerubahan,
+  };
+  return [entry, ...(logs ?? [])];
+}
 
 export interface SmartInsightItem {
   asset: Asset;
   categoryName: string;
   repairCount: number;
+  recent6MonthCount: number;
   totalRepairCost: number;
+  costRatioPercent: number;
   reasons: string[];
   recommendation: string;
   priority: 'Tinggi' | 'Sedang';
+}
+
+export interface IdleAssetRecommendation {
+  asset: Asset;
+  categoryName: string;
+  idleDays: number;
+  lastUsedDate: string;
+  recommendation: string;
 }
 
 export interface CategoryConditionStat {
@@ -48,9 +158,12 @@ export interface DashboardMetrics {
   inRepairCount: number;
   totalAssetValue: number;
   totalMaintenanceCost: number;
+  mttrDays: number;
+  qrCoveragePercent: number;
   categoryStats: CategoryConditionStat[];
   unitStats: UnitDistributionStat[];
   smartInsights: SmartInsightItem[];
+  idleAssets: IdleAssetRecommendation[];
 }
 
 export function formatRupiah(amount: number): string {
@@ -85,8 +198,18 @@ export function formatDateId(isoDate: string | null): string {
   return `${Number(day)} ${monthLabel} ${year}`;
 }
 
-export function computeDashboardMetrics(data: AppStateData): DashboardMetrics {
-  const { assets, categories, maintenance } = data;
+function diffDaysBetween(fromIso: string, toIso: string): number {
+  const start = Date.parse(fromIso);
+  const end = Date.parse(toIso);
+  if (Number.isNaN(start) || Number.isNaN(end)) return 0;
+  return Math.max(0, Math.round((end - start) / (1000 * 60 * 60 * 24)));
+}
+
+export function computeDashboardMetrics(
+  data: AppStateData,
+  referenceDateIso = new Date().toISOString().slice(0, 10),
+): DashboardMetrics {
+  const { assets, categories, maintenance, picHistory } = data;
   const totalAssets = assets.length;
   const baikCount = assets.filter((a) => a.kondisi === 'Baik').length;
   const baikPercentage =
@@ -116,6 +239,30 @@ export function computeDashboardMetrics(data: AppStateData): DashboardMetrics {
     (sum, m) => sum + (m.biayaServis || 0),
     0,
   );
+
+  // MTTR (Mean Time to Repair) in days across completed tickets
+  const resolvedTickets = maintenance.filter(
+    (m) => m.statusTiket === 'Selesai' && m.tanggalPerbaikan,
+  );
+  const mttrDays =
+    resolvedTickets.length > 0
+      ? Number(
+          (
+            resolvedTickets.reduce(
+              (sum, t) =>
+                sum + diffDaysBetween(t.tanggalLapor, t.tanggalPerbaikan!),
+              0,
+            ) / resolvedTickets.length
+          ).toFixed(1),
+        )
+      : 0;
+
+  // QR coverage (every registered BMD asset with valid code & NUP has QR generated)
+  const qrReadyCount = assets.filter(
+    (a) => Boolean(a.kodeBarangBmd && a.nup),
+  ).length;
+  const qrCoveragePercent =
+    totalAssets > 0 ? Math.round((qrReadyCount / totalAssets) * 100) : 0;
 
   const categoryStats: CategoryConditionStat[] = categories.map((cat) => {
     const catAssets = assets.filter((a) => a.categoryId === cat.id);
@@ -150,32 +297,55 @@ export function computeDashboardMetrics(data: AppStateData): DashboardMetrics {
     .sort((a, b) => b.total - a.total);
 
   const smartInsights: SmartInsightItem[] = [];
+  const idleAssets: IdleAssetRecommendation[] = [];
   const categoryNameMap = new Map(categories.map((c) => [c.id, c.nama]));
 
   for (const asset of assets) {
     const assetMaint = maintenance.filter((m) => m.assetId === asset.id);
     const repairCount = assetMaint.length;
+    const recent6MonthCount = assetMaint.filter(
+      (m) => diffDaysBetween(m.tanggalLapor, referenceDateIso) <= 183,
+    ).length;
     const totalRepairCost = assetMaint.reduce(
       (sum, m) => sum + (m.biayaServis || 0),
       0,
     );
+    const costRatioPercent =
+      asset.nilaiPerolehan > 0
+        ? Math.round((totalRepairCost / asset.nilaiPerolehan) * 100)
+        : 0;
+
     const isRusakBerat = asset.kondisi === 'Rusak Berat';
+    const isHighCost =
+      asset.nilaiPerolehan > 0 && totalRepairCost > asset.nilaiPerolehan * 0.5;
+    const isHighFreq6Mo = recent6MonthCount >= 3;
     const isRepeatedDamage = repairCount >= 2;
 
-    if (isRusakBerat || isRepeatedDamage) {
+    if (isRusakBerat || isHighCost || isHighFreq6Mo || isRepeatedDamage) {
       const reasons: string[] = [];
       if (isRusakBerat) reasons.push('Kondisi Rusak Berat');
-      if (isRepeatedDamage)
+      if (isHighCost)
+        reasons.push(
+          `Biaya Servis Tinggi (${costRatioPercent}% Nilai Perolehan)`,
+        );
+      if (isHighFreq6Mo) {
+        reasons.push(`Sering Rusak ≥3x dalam 6 Bulan (${recent6MonthCount}x)`);
+      } else if (isRepeatedDamage) {
         reasons.push(`Riwayat Kerusakan Berulang (${repairCount}x)`);
+      }
 
       let recommendation =
         'Evaluasi biaya pemeliharaan dan jadwalkan inspeksi teknis berkala.';
-      if (isRusakBerat && isRepeatedDamage) {
-        recommendation =
-          'Prioritas Tinggi: Usulkan penghapusan BMD & pengadaan unit pengganti.';
+      if ((isRusakBerat && isRepeatedDamage) || isHighCost) {
+        recommendation = isHighCost
+          ? 'Prioritas Tinggi: Akumulasi biaya servis >50% nilai perolehan — usulkan penghapusan BMD.'
+          : 'Prioritas Tinggi: Usulkan penghapusan BMD & pengadaan unit pengganti.';
       } else if (isRusakBerat) {
         recommendation =
-          'Usulkan kajian kelayakan perbaikan atau penghapusan BMD ke BPKAD.';
+          'Usulkan kajian kelayakan perbaikan berat atau penghapusan BMD ke BPKAD.';
+      } else if (isHighFreq6Mo) {
+        recommendation =
+          'Prioritas Tinggi: Evaluasi penggantian unit (lemon asset ≥3x rusak / 6 bulan).';
       } else if (repairCount >= 2) {
         recommendation =
           'Audit keandalan unit dan pertimbangkan peremajaan komponen utama.';
@@ -185,18 +355,45 @@ export function computeDashboardMetrics(data: AppStateData): DashboardMetrics {
         asset,
         categoryName: categoryNameMap.get(asset.categoryId) ?? 'Lainnya',
         repairCount,
+        recent6MonthCount,
         totalRepairCost,
+        costRatioPercent,
         reasons,
         recommendation,
-        priority: isRusakBerat ? 'Tinggi' : 'Sedang',
+        priority: isRusakBerat || isHighCost || isHighFreq6Mo ? 'Tinggi' : 'Sedang',
       });
+    }
+
+    // Idle asset relocation candidate (PRD 8.3: status Tersedia dalam waktu lama >= 30 hari)
+    if (asset.statusPemakaian === 'Tersedia' && asset.kondisi !== 'Rusak Berat') {
+      const closedHistories = picHistory
+        .filter((h) => h.assetId === asset.id && h.tanggalSelesai !== null)
+        .sort((a, b) =>
+          (b.tanggalSelesai ?? '').localeCompare(a.tanggalSelesai ?? ''),
+        );
+      const lastUsedDate = closedHistories[0]?.tanggalSelesai ?? asset.createdAt;
+      const idleDays = diffDaysBetween(lastUsedDate, referenceDateIso);
+      if (idleDays >= 30) {
+        idleAssets.push({
+          asset,
+          categoryName: categoryNameMap.get(asset.categoryId) ?? 'Lainnya',
+          idleDays,
+          lastUsedDate,
+          recommendation: `Menganggur ${idleDays} hari di ${asset.unitKerja}. Kandidat realokasi antar-bidang/UPTD yang membutuhkan.`,
+        });
+      }
     }
   }
 
   smartInsights.sort((a, b) => {
     if (a.priority !== b.priority) return a.priority === 'Tinggi' ? -1 : 1;
+    if (b.costRatioPercent !== a.costRatioPercent) {
+      return b.costRatioPercent - a.costRatioPercent;
+    }
     return b.repairCount - a.repairCount;
   });
+
+  idleAssets.sort((a, b) => b.idleDays - a.idleDays);
 
   return {
     totalAssets,
@@ -208,9 +405,12 @@ export function computeDashboardMetrics(data: AppStateData): DashboardMetrics {
     inRepairCount,
     totalAssetValue,
     totalMaintenanceCost,
+    mttrDays,
+    qrCoveragePercent,
     categoryStats,
     unitStats,
     smartInsights,
+    idleAssets,
   };
 }
 
@@ -266,11 +466,14 @@ export interface HandoverParams {
   kondisiSerahTerima: AssetCondition;
   lokasiPenempatanBaru?: string;
   catatan: string;
+  fileBastUrl?: string;
+  fileBastNama?: string;
 }
 
 export function handoverAssetToPic(
   data: AppStateData,
   params: HandoverParams,
+  actor: ActorContext = DEFAULT_ACTOR,
 ): AppStateData {
   const asset = data.assets.find((a) => a.id === params.assetId);
   if (!asset) {
@@ -307,6 +510,8 @@ export function handoverAssetToPic(
     nomorBast: params.nomorBast.trim(),
     kondisiSerahTerima: params.kondisiSerahTerima,
     catatan: params.catatan.trim() || 'Serah terima pemakaian aset dinas.',
+    fileBastUrl: params.fileBastUrl,
+    fileBastNama: params.fileBastNama,
   };
 
   const updatedAssets: Asset[] = data.assets.map((a) => {
@@ -326,6 +531,14 @@ export function handoverAssetToPic(
     ...data,
     assets: updatedAssets,
     picHistory: [...updatedPicHistory, newEntry],
+    auditLogs: appendAuditLog(
+      data.auditLogs,
+      actor,
+      'Serah Terima PIC',
+      'Serah Terima PIC',
+      asset.id,
+      `Mutasi "${asset.nama}" ke ${employee.nama} (BAST ${params.nomorBast.trim()}, Kondisi: ${params.kondisiSerahTerima}).`,
+    ),
   };
 }
 
@@ -339,7 +552,9 @@ export interface ReturnAssetParams {
 export function returnAssetToPool(
   data: AppStateData,
   params: ReturnAssetParams,
+  actor: ActorContext = DEFAULT_ACTOR,
 ): AppStateData {
+  const asset = data.assets.find((a) => a.id === params.assetId);
   const updatedPicHistory = data.picHistory.map((entry) => {
     if (entry.assetId === params.assetId && entry.tanggalSelesai === null) {
       return {
@@ -365,6 +580,14 @@ export function returnAssetToPool(
     ...data,
     assets: updatedAssets,
     picHistory: updatedPicHistory,
+    auditLogs: appendAuditLog(
+      data.auditLogs,
+      actor,
+      'Pengembalian ke Gudang',
+      'Serah Terima PIC',
+      params.assetId,
+      `Aset "${asset?.nama ?? params.assetId}" dikembalikan ke gudang (${params.lokasiGudang}).`,
+    ),
   };
 }
 
@@ -376,11 +599,14 @@ export interface ReportDamageParams {
   deskripsiKerusakan: string;
   statusTiket?: Exclude<TicketStatus, 'Selesai'>;
   teknisiVendor?: string;
+  fotoKerusakanUrl?: string;
+  fotoKerusakanNama?: string;
 }
 
 export function reportAssetDamage(
   data: AppStateData,
   params: ReportDamageParams,
+  actor: ActorContext = DEFAULT_ACTOR,
 ): AppStateData {
   const asset = data.assets.find((a) => a.id === params.assetId);
   if (!asset) {
@@ -402,6 +628,8 @@ export function reportAssetDamage(
     pelaporNama: pelapor.nama,
     tingkatKerusakan: params.tingkatKerusakan,
     deskripsiKerusakan: params.deskripsiKerusakan.trim(),
+    fotoKerusakanUrl: params.fotoKerusakanUrl,
+    fotoKerusakanNama: params.fotoKerusakanNama,
     statusTiket: params.statusTiket ?? 'Menunggu Perbaikan',
     tanggalPerbaikan: null,
     tindakanPerbaikan: '',
@@ -423,6 +651,14 @@ export function reportAssetDamage(
     ...data,
     assets: updatedAssets,
     maintenance: [newRecord, ...data.maintenance],
+    auditLogs: appendAuditLog(
+      data.auditLogs,
+      actor,
+      'Laporan Kerusakan',
+      'Pemeliharaan',
+      asset.id,
+      `Kerusakan "${asset.nama}" (${params.tingkatKerusakan}) dilaporkan oleh ${pelapor.nama}: ${params.deskripsiKerusakan.trim()}.`,
+    ),
   };
 }
 
@@ -433,11 +669,14 @@ export interface ResolveMaintenanceParams {
   teknisiVendor: string;
   biayaServis: number;
   kondisiAkhir: AssetCondition;
+  fotoPerbaikanUrl?: string;
+  fotoPerbaikanNama?: string;
 }
 
 export function resolveMaintenanceTicket(
   data: AppStateData,
   params: ResolveMaintenanceParams,
+  actor: ActorContext = DEFAULT_ACTOR,
 ): AppStateData {
   const ticket = data.maintenance.find((m) => m.id === params.ticketId);
   if (!ticket) {
@@ -450,6 +689,8 @@ export function resolveMaintenanceTicket(
     throw new Error('Nama teknisi / vendor wajib diisi.');
   }
 
+  const asset = data.assets.find((a) => a.id === ticket.assetId);
+
   const updatedMaintenance: MaintenanceRecord[] = data.maintenance.map((m) => {
     if (m.id !== params.ticketId) return m;
     return {
@@ -460,6 +701,8 @@ export function resolveMaintenanceTicket(
       teknisiVendor: params.teknisiVendor.trim(),
       biayaServis: Math.max(0, Number(params.biayaServis) || 0),
       kondisiAkhir: params.kondisiAkhir,
+      fotoPerbaikanUrl: params.fotoPerbaikanUrl ?? m.fotoPerbaikanUrl,
+      fotoPerbaikanNama: params.fotoPerbaikanNama ?? m.fotoPerbaikanNama,
     };
   });
 
@@ -484,6 +727,14 @@ export function resolveMaintenanceTicket(
     ...data,
     assets: updatedAssets,
     maintenance: updatedMaintenance,
+    auditLogs: appendAuditLog(
+      data.auditLogs,
+      actor,
+      'Penyelesaian Perbaikan',
+      'Pemeliharaan',
+      ticket.id,
+      `Perbaikan "${asset?.nama ?? ticket.assetId}" selesai oleh ${params.teknisiVendor.trim()} (Biaya: ${formatRupiah(Math.max(0, Number(params.biayaServis) || 0))}, Kondisi Akhir: ${params.kondisiAkhir}).`,
+    ),
   };
 }
 
@@ -492,7 +743,13 @@ export function updateTicketStatus(
   ticketId: string,
   statusTiket: Exclude<TicketStatus, 'Selesai'>,
   teknisiVendor?: string,
+  actor: ActorContext = DEFAULT_ACTOR,
 ): AppStateData {
+  const ticket = data.maintenance.find((m) => m.id === ticketId);
+  const asset = ticket
+    ? data.assets.find((a) => a.id === ticket.assetId)
+    : undefined;
+
   return {
     ...data,
     maintenance: data.maintenance.map((m) => {
@@ -503,6 +760,14 @@ export function updateTicketStatus(
         teknisiVendor: teknisiVendor?.trim() || m.teknisiVendor,
       };
     }),
+    auditLogs: appendAuditLog(
+      data.auditLogs,
+      actor,
+      'Update Status Servis',
+      'Pemeliharaan',
+      ticketId,
+      `Status tiket "${asset?.nama ?? ticketId}" diperbarui menjadi ${statusTiket}.`,
+    ),
   };
 }
 
@@ -510,6 +775,7 @@ export function createNewAsset(
   data: AppStateData,
   newAssetInput: Omit<Asset, 'id' | 'createdAt'>,
   initialBast?: string,
+  actor: ActorContext = DEFAULT_ACTOR,
 ): AppStateData {
   const newId = `ast-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const today = new Date().toISOString().slice(0, 10);
@@ -528,7 +794,9 @@ export function createNewAsset(
       employeeId: asset.picAktifId,
       tanggalMulai: today,
       tanggalSelesai: null,
-      nomorBast: initialBast?.trim() || `027/REG-${asset.nup}/438.5.4/${asset.tahunPerolehan}`,
+      nomorBast:
+        initialBast?.trim() ||
+        `027/REG-${asset.nup}/438.5.4/${asset.tahunPerolehan}`,
       kondisiSerahTerima: asset.kondisi,
       catatan: 'Pencatatan awal penanggung jawab (PIC) aset baru.',
     };
@@ -539,34 +807,112 @@ export function createNewAsset(
     ...data,
     assets: [asset, ...data.assets],
     picHistory: nextPicHistory,
+    auditLogs: appendAuditLog(
+      data.auditLogs,
+      actor,
+      'Pendaftaran Aset Baru',
+      'Aset',
+      newId,
+      `Aset "${asset.nama}" (${asset.kodeBarangBmd} · NUP ${asset.nup}) didaftarkan pada ${asset.unitKerja}.`,
+    ),
+  };
+}
+
+export interface UpdateAssetDetailsParams {
+  assetId: string;
+  lokasiPenempatan: string;
+  kondisi: AssetCondition;
+  fotoAsetUrl?: string;
+  fotoAsetNama?: string;
+  spesifikasi?: Record<string, string>;
+  terakhirDiinspeksi?: string;
+}
+
+export function updateAssetDetails(
+  data: AppStateData,
+  params: UpdateAssetDetailsParams,
+  actor: ActorContext = DEFAULT_ACTOR,
+): AppStateData {
+  const existing = data.assets.find((a) => a.id === params.assetId);
+  if (!existing) {
+    throw new Error('Aset tidak ditemukan.');
+  }
+
+  const today = params.terakhirDiinspeksi ?? new Date().toISOString().slice(0, 10);
+
+  const updatedAssets = data.assets.map((a) => {
+    if (a.id !== params.assetId) return a;
+    return {
+      ...a,
+      lokasiPenempatan: params.lokasiPenempatan.trim() || a.lokasiPenempatan,
+      kondisi: params.kondisi,
+      fotoAsetUrl: params.fotoAsetUrl ?? a.fotoAsetUrl,
+      fotoAsetNama: params.fotoAsetNama ?? a.fotoAsetNama,
+      spesifikasi: params.spesifikasi ?? a.spesifikasi,
+      terakhirDiinspeksi: today,
+    };
+  });
+
+  return {
+    ...data,
+    assets: updatedAssets,
+    auditLogs: appendAuditLog(
+      data.auditLogs,
+      actor,
+      'Inspeksi / Pembaruan Aset',
+      'Aset',
+      existing.id,
+      `Aset "${existing.nama}" diperbarui (Kondisi: ${existing.kondisi} → ${params.kondisi}, Lokasi: ${params.lokasiPenempatan.trim() || existing.lokasiPenempatan}).`,
+    ),
   };
 }
 
 export function upsertCategory(
   data: AppStateData,
   category: Omit<AssetCategory, 'id'> & { id?: string },
+  actor: ActorContext = DEFAULT_ACTOR,
 ): AppStateData {
   if (category.id) {
     return {
       ...data,
       categories: data.categories.map((c) =>
-        c.id === category.id ? ({ ...category, id: category.id } as AssetCategory) : c,
+        c.id === category.id
+          ? ({ ...category, id: category.id } as AssetCategory)
+          : c,
+      ),
+      auditLogs: appendAuditLog(
+        data.auditLogs,
+        actor,
+        'Ubah Jenis Aset',
+        'Jenis Aset',
+        category.id,
+        `Skema jenis aset "${category.nama}" (${category.kode}) diperbarui.`,
       ),
     };
   }
+  const newId = `cat-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const created: AssetCategory = {
     ...category,
-    id: `cat-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    id: newId,
   };
   return {
     ...data,
     categories: [...data.categories, created],
+    auditLogs: appendAuditLog(
+      data.auditLogs,
+      actor,
+      'Tambah Jenis Aset Dinamis',
+      'Jenis Aset',
+      newId,
+      `Jenis aset baru "${created.nama}" (${created.kode}) ditambahkan dengan ${created.fields.length} atribut teknis.`,
+    ),
   };
 }
 
 export function upsertUnitKerja(
   data: AppStateData,
   unit: Omit<UnitKerjaItem, 'id'> & { id?: string },
+  actor: ActorContext = DEFAULT_ACTOR,
 ): AppStateData {
   if (!unit.kode.trim() || !unit.nama.trim()) {
     throw new Error('Kode dan Nama Bidang/UPTD wajib diisi.');
@@ -600,11 +946,20 @@ export function upsertUnitKerja(
             a.unitKerja === oldName ? { ...a, unitKerja: nextName } : a,
           )
         : data.assets,
+      auditLogs: appendAuditLog(
+        data.auditLogs,
+        actor,
+        'Ubah Master Bidang',
+        'Bidang',
+        unit.id,
+        `Data bidang "${nextName}" diperbarui${renamed ? ` (dari "${oldName}")` : ''}.`,
+      ),
     };
   }
 
+  const newId = `unit-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const created: UnitKerjaItem = {
-    id: `unit-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    id: newId,
     kode: unit.kode.trim().toUpperCase(),
     nama: unit.nama.trim(),
     kepalaUnit: unit.kepalaUnit.trim() || '-',
@@ -614,12 +969,21 @@ export function upsertUnitKerja(
   return {
     ...data,
     units: [...data.units, created],
+    auditLogs: appendAuditLog(
+      data.auditLogs,
+      actor,
+      'Tambah Master Bidang',
+      'Bidang',
+      newId,
+      `Bidang baru "${created.nama}" (${created.kode}) ditambahkan.`,
+    ),
   };
 }
 
 export function upsertEmployee(
   data: AppStateData,
   employee: Omit<Employee, 'id'> & { id?: string },
+  actor: ActorContext = DEFAULT_ACTOR,
 ): AppStateData {
   if (!employee.nip.trim() || !employee.nama.trim() || !employee.jabatan.trim()) {
     throw new Error('NIP/ID, Nama Pegawai, dan Jabatan wajib diisi.');
@@ -645,11 +1009,20 @@ export function upsertEmployee(
           ? { ...m, pelaporNama: employee.nama.trim() }
           : m,
       ),
+      auditLogs: appendAuditLog(
+        data.auditLogs,
+        actor,
+        'Ubah Data Pegawai',
+        'Pegawai',
+        employee.id,
+        `Data pegawai "${employee.nama.trim()}" (${employee.statusKepegawaian}) diperbarui.`,
+      ),
     };
   }
 
+  const newId = `emp-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const created: Employee = {
-    id: `emp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    id: newId,
     nip: employee.nip.trim(),
     nama: employee.nama.trim(),
     jabatan: employee.jabatan.trim(),
@@ -661,6 +1034,52 @@ export function upsertEmployee(
   return {
     ...data,
     employees: [created, ...data.employees],
+    auditLogs: appendAuditLog(
+      data.auditLogs,
+      actor,
+      'Tambah Pegawai Baru',
+      'Pegawai',
+      newId,
+      `Pegawai baru "${created.nama}" (${created.statusKepegawaian} · ${created.unitKerja}) ditambahkan.`,
+    ),
+  };
+}
+
+export function validateBackupPayload(
+  raw: unknown,
+  actor: ActorContext = DEFAULT_ACTOR,
+): AppStateData {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('Format file backup tidak valid (bukan objek JSON).');
+  }
+  const obj = raw as Partial<AppStateData>;
+  if (
+    !Array.isArray(obj.categories) ||
+    !Array.isArray(obj.units) ||
+    !Array.isArray(obj.employees) ||
+    !Array.isArray(obj.assets) ||
+    !Array.isArray(obj.picHistory) ||
+    !Array.isArray(obj.maintenance)
+  ) {
+    throw new Error(
+      'Struktur file backup tidak lengkap. Pastikan berasal dari ekspor JSON SI-ASET SMART DPUBMSDA.',
+    );
+  }
+  return {
+    categories: obj.categories,
+    units: obj.units,
+    employees: obj.employees,
+    assets: obj.assets,
+    picHistory: obj.picHistory,
+    maintenance: obj.maintenance,
+    auditLogs: appendAuditLog(
+      Array.isArray(obj.auditLogs) ? obj.auditLogs : [],
+      actor,
+      'Pemulihan Backup JSON',
+      'Sistem',
+      'restore',
+      `Database dipulihkan (${obj.assets.length} aset, ${obj.employees.length} pegawai, ${obj.picHistory.length} histori PIC).`,
+    ),
   };
 }
 
