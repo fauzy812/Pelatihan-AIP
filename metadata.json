@@ -1,0 +1,6 @@
+{
+  "name": "SI-ASET SMART DPUBMSDA",
+  "description": "Sistem Informasi Pencatatan, Pemantauan Kondisi, dan Riwayat Pemeliharaan Aset Terpadu DPUBMSDA Kabupaten Sidoarjo",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
